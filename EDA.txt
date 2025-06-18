@@ -1,72 +1,78 @@
-Dữ liệu NASA POWER API cho Thành phố Hồ Chí Minh
+# Thông tin bộ dữ liệu
 
-a) Chức năng (nội dung) của bộ dữ liệu là gì?
+**Dữ liệu NASA POWER API cho Thành phố Hồ Chí Minh**
+
+**a) Chức năng (nội dung) của bộ dữ liệu là gì?**
 
 Bộ dữ liệu này chứa thông tin khí tượng và bề mặt đất hàng ngày cho Thành phố Hồ Chí Minh, được thu thập tự động thông qua API NASA Prediction Of Worldwide Energy Resources (POWER). Dữ liệu bao gồm nhiều tham số quan trọng như:
 
-Nhiệt độ: trung bình, tối thiểu, tối đa, điểm sương, bầu ướt, nhiệt độ bề mặt đất
-Độ ẩm: tương đối, tuyệt đối
-Lượng mưa: mục tiêu dự đoán chính
-Áp suất bề mặt
-Gió: tốc độ trung bình, tối đa, hướng gió ở các độ cao khác nhau
-Bức xạ mặt trời: bức xạ sóng dài xuống bề mặt
-Độ ẩm đất: bề mặt, vùng rễ, toàn bộ mặt cắt
+*   **Nhiệt độ**: trung bình, tối thiểu, tối đa, điểm sương, bầu ướt, nhiệt độ bề mặt đất
+*   **Độ ẩm**: tương đối, tuyệt đối  
+*   **Lượng mưa**: mục tiêu dự đoán chính
+*   **Áp suất bề mặt**
+*   **Gió**: tốc độ trung bình, tối đa, hướng gió ở các độ cao khác nhau
+*   **Bức xạ mặt trời**: bức xạ sóng dài xuống bề mặt
+*   **Độ ẩm đất**: bề mặt, vùng rễ, toàn bộ mặt cắt
+
 Dữ liệu được cung cấp cho mỗi ngày trong khoảng thời gian được chỉ định từ 01/01/2000 đến 30/04/2025, phục vụ mục tiêu dự đoán thời tiết cho toàn thành phố.
 
-b) Nguồn gốc của bộ dữ liệu?
+**b) Nguồn gốc của bộ dữ liệu?**
 
 Dữ liệu gốc được cung cấp bởi dự án NASA POWER. Dữ liệu cụ thể trong bộ dữ liệu này được thu thập bằng cách gọi đến API công khai của NASA POWER:
 
-Nguồn dữ liệu: NASA POWER (Prediction Of Worldwide Energy Resources)
-API Endpoint: https://power.larc.nasa.gov/api/temporal/daily/point
-Phương pháp: Single request crawl với 20 parameters (trong giới hạn API)
-Vị trí: Tọa độ trung tâm TP.HCM (lat: 10.78, lon: 106.7)
-c) Cấu trúc các tập tin của bộ dữ liệu? Ý nghĩa từng tập tin.
+*   **Nguồn dữ liệu:** NASA POWER (Prediction Of Worldwide Energy Resources)
+*   **API Endpoint:** `https://power.larc.nasa.gov/api/temporal/daily/point`
+*   **Phương pháp:** Single request crawl với 20 parameters (trong giới hạn API)
+*   **Vị trí:** Tọa độ trung tâm TP.HCM (lat: 10.78, lon: 106.7)
 
-Dữ liệu sau khi thu thập được lưu trữ trong thư mục nasa_power_hcmc_data với cấu trúc đơn giản:
+**c) Cấu trúc các tập tin của bộ dữ liệu? Ý nghĩa từng tập tin.**
 
-Tệp dữ liệu chính:
-Tên tệp: hcmc_weather_data_{Ngày_Bắt_Đầu}_{Ngày_Kết_Thúc}.csv
-Nội dung: Chứa dữ liệu hàng ngày của tất cả 20 tham số khí tượng cho TP.HCM trong khoảng thời gian xác định. Mỗi hàng đại diện cho một ngày.
-d) Các thông tin nào mà các record (bản ghi) lưu trữ?
+Dữ liệu sau khi thu thập được lưu trữ trong thư mục `nasa_power_hcmc_data` với cấu trúc đơn giản:
+
+1.  **Tệp dữ liệu chính:**
+    *   **Tên tệp:** `hcmc_weather_data_{Ngày_Bắt_Đầu}_{Ngày_Kết_Thúc}.csv`
+    *   **Nội dung:** Chứa dữ liệu hàng ngày của tất cả 20 tham số khí tượng cho TP.HCM trong khoảng thời gian xác định. Mỗi hàng đại diện cho một ngày.
+
+**d) Các thông tin nào mà các record (bản ghi) lưu trữ?**
 
 Mỗi record (hàng trong tệp CSV) tương ứng với dữ liệu của một ngày cho TP.HCM và chứa các cột sau:
 
-Thông tin địa lý và thời gian:
+**Thông tin địa lý và thời gian:**
+*   **DATE:** Ngày ghi nhận dữ liệu (định dạng datetime)
+*   **LATITUDE:** Vĩ độ điểm đại diện TP.HCM (10.78)
+*   **LONGITUDE:** Kinh độ điểm đại diện TP.HCM (106.7)
 
-DATE: Ngày ghi nhận dữ liệu (định dạng datetime)
-LATITUDE: Vĩ độ điểm đại diện TP.HCM (10.78)
-LONGITUDE: Kinh độ điểm đại diện TP.HCM (106.7)
-Nhóm 1 - Nhiệt độ, độ ẩm, mưa, áp suất (11 chỉ số):
+**Nhóm 1 - Nhiệt độ, độ ẩm, mưa, áp suất (11 chỉ số):**
+*   **PRECTOTCORR:** Lượng mưa đã hiệu chỉnh (mm/ngày) - *Biến mục tiêu*
+*   **QV2M:** Độ ẩm tuyệt đối ở 2m (g/kg)
+*   **RH2M:** Độ ẩm tương đối ở 2m (%)
+*   **T2M:** Nhiệt độ trung bình ở 2m (°C)
+*   **T2MDEW:** Điểm sương/sương giá ở 2m (°C)
+*   **T2MWET:** Nhiệt độ bầu ướt ở 2m (°C)
+*   **T2M_MAX:** Nhiệt độ tối đa ở 2m (°C)
+*   **TS:** Nhiệt độ bề mặt đất (°C)
+*   **T2M_MIN:** Nhiệt độ tối thiểu ở 2m (°C)
+*   **ALLSKY_SFC_LW_DWN:** Bức xạ sóng dài xuống bề mặt (MJ/m²/ngày)
+*   **PS:** Áp suất bề mặt (kPa)
 
-PRECTOTCORR: Lượng mưa đã hiệu chỉnh (mm/ngày) - Biến mục tiêu
-QV2M: Độ ẩm tuyệt đối ở 2m (g/kg)
-RH2M: Độ ẩm tương đối ở 2m (%)
-T2M: Nhiệt độ trung bình ở 2m (°C)
-T2MDEW: Điểm sương/sương giá ở 2m (°C)
-T2MWET: Nhiệt độ bầu ướt ở 2m (°C)
-T2M_MAX: Nhiệt độ tối đa ở 2m (°C)
-TS: Nhiệt độ bề mặt đất (°C)
-T2M_MIN: Nhiệt độ tối thiểu ở 2m (°C)
-ALLSKY_SFC_LW_DWN: Bức xạ sóng dài xuống bề mặt (MJ/m²/ngày)
-PS: Áp suất bề mặt (kPa)
-Nhóm 2 - Gió và độ ẩm đất (9 chỉ số):
+**Nhóm 2 - Gió và độ ẩm đất (9 chỉ số):**
+*   **WS10M:** Tốc độ gió ở 10m (m/s)
+*   **WD10M:** Hướng gió ở 10m (Độ)
+*   **WS10M_MAX:** Tốc độ gió tối đa ở 10m (m/s)
+*   **WS2M_MAX:** Tốc độ gió tối đa ở 2m (m/s)
+*   **WS2M:** Tốc độ gió ở 2m (m/s)
+*   **WD2M:** Hướng gió ở 2m (Độ)
+*   **GWETPROF:** Độ ẩm đất theo mặt cắt (tỷ lệ 0-1)
+*   **GWETTOP:** Độ ẩm bề mặt đất (tỷ lệ 0-1)
+*   **GWETROOT:** Độ ẩm vùng rễ (tỷ lệ 0-1)
 
-WS10M: Tốc độ gió ở 10m (m/s)
-WD10M: Hướng gió ở 10m (Độ)
-WS10M_MAX: Tốc độ gió tối đa ở 10m (m/s)
-WS2M_MAX: Tốc độ gió tối đa ở 2m (m/s)
-WS2M: Tốc độ gió ở 2m (m/s)
-WD2M: Hướng gió ở 2m (Độ)
-GWETPROF: Độ ẩm đất theo mặt cắt (tỷ lệ 0-1)
-GWETTOP: Độ ẩm bề mặt đất (tỷ lệ 0-1)
-GWETROOT: Độ ẩm vùng rễ (tỷ lệ 0-1)
-Ghi chú quan trọng:
+**Ghi chú quan trọng:**
+- Giá trị `-999` biểu thị dữ liệu thiếu hoặc không thể tính toán
+- Dữ liệu được crawl trong 1 lần duy nhất với 20 parameters (tuân thủ giới hạn API)
+- Tổng cộng có 20 weather parameters + 3 metadata columns cho việc dự đoán thời tiết TP.HCM
 
-Giá trị -999 biểu thị dữ liệu thiếu hoặc không thể tính toán
-Dữ liệu được crawl trong 1 lần duy nhất với 20 parameters (tuân thủ giới hạn API)
-Tổng cộng có 20 weather parameters + 3 metadata columns cho việc dự đoán thời tiết TP.HCM
-Tham khảo
-NASA POWER Data Access Viewer: https://power.larc.nasa.gov/data-access-viewer/
-NASA POWER Documentation: https://power.larc.nasa.gov/docs/
-NASA POWER API Documentation: https://power.larc.nasa.gov/docs/services/api/
+### Tham khảo
+
+*   **NASA POWER Data Access Viewer:** [https://power.larc.nasa.gov/data-access-viewer/](https://power.larc.nasa.gov/data-access-viewer/)
+*   **NASA POWER Documentation:** [https://power.larc.nasa.gov/docs/](https://power.larc.nasa.gov/docs/)
+*   **NASA POWER API Documentation:** [https://power.larc.nasa.gov/docs/services/api/](https://power.larc.nasa.gov/docs/services/api/)
