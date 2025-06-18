@@ -1,5 +1,6 @@
 # =============================================================================
-# COMPLETE REFACTOR: 4 ANALYSIS-VISUALIZATION PAIRS
+# COMPLETE REFACTOR: 4 ANALYSIS-VISUALIZATION PAIRS  
+# ✅ RESIDUAL ANALYSIS REMOVED - NOW HANDLED BY STATIONARITY
 # =============================================================================
 
 from typing import Dict, List, Tuple, Any, Optional
@@ -8,7 +9,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.fft import fft, fftfreq
-from scipy.stats import probplot
 import warnings
 
 from ..config.constants import Config
@@ -20,8 +20,10 @@ class TemporalStructureAnalyzer:
     ✅ REFACTORED: 4 Pure Analysis-Visualization Pairs
     1. Seasonal Patterns (groupby-based)
     2. FFT Frequency Analysis 
-    3. MSTL Decomposition
-    4. Component Diagnostics
+    3. MSTL Decomposition (returns residual for Stationarity analysis)
+    4. Wavelet Analysis
+    
+    ❌ REMOVED: Residual Analysis (now in StationarityAutocorrelationAnalyzer)
     """
 
     def __init__(self, df: pd.DataFrame, target_col: str = None, date_col: str = None):
@@ -208,7 +210,7 @@ class TemporalStructureAnalyzer:
         fft_values = fft(detrended.values)
         frequencies = fftfreq(len(detrended), d=1)
 
-        # Get positive frequencies  
+        # Get positive frequencies
         positive_freq_idx = frequencies > 0
         positive_frequencies = frequencies[positive_freq_idx]
         positive_fft_magnitude = np.abs(fft_values[positive_freq_idx])
@@ -331,6 +333,7 @@ class TemporalStructureAnalyzer:
                       **stl_kwargs) -> Dict[str, Any]:
         """
         ✅ PURE ANALYSIS: MSTL decomposition (NO VISUALIZATION)
+        ✅ RETURNS RESIDUAL: For Stationarity analysis
         
         Args:
             periods: List of seasonal periods for decomposition
@@ -338,7 +341,7 @@ class TemporalStructureAnalyzer:
             **stl_kwargs: Additional parameters for MSTL
             
         Returns:
-            Dict containing MSTL decomposition results
+            Dict containing MSTL decomposition results including residual
         """
         print(f"📊 MSTL Decomposition")
         print(f"   - Periods: {periods}")
@@ -361,15 +364,15 @@ class TemporalStructureAnalyzer:
 
             print(f"   🔄 Applied {transform} transformation")
 
-            # Run MSTL decomposition - FIXED parameters
+            # Run MSTL decomposition with clean parameters
             stl_kwargs_clean = {k: v for k, v in stl_kwargs.items() 
-                               if k in ['seasonal_deg', 'trend_deg', 'low_pass_deg', 
-                                       'seasonal_jump', 'trend_jump', 'low_pass_jump']}
+                               if k not in ['seasonal_deg', 'trend_deg']}  # Remove problematic parameters
             
             mstl = MSTL(transformed_ts, periods=periods, **stl_kwargs_clean)
             mstl_result = mstl.fit()
 
             print(f"   ✅ MSTL decomposition completed")
+            print(f"   📤 Residual component available for Stationarity analysis")
 
             return {
                 'success': True,
@@ -379,7 +382,7 @@ class TemporalStructureAnalyzer:
                 'periods': periods,
                 'trend': mstl_result.trend,
                 'seasonal': mstl_result.seasonal,
-                'resid': mstl_result.resid,
+                'resid': mstl_result.resid,  # ✅ KEY: Residual for Stationarity
                 'transform': transform,
                 'parameters': stl_kwargs_clean
             }
@@ -457,12 +460,12 @@ class TemporalStructureAnalyzer:
             axes[plot_idx].grid(True, alpha=0.3)
             plot_idx += 1
 
-        # Residual component
+        # Residual component (for visual reference only)
         if 'resid' in show_components:
             resid = mstl_results['resid']
             axes[plot_idx].plot(resid.index, resid.values, 'purple', linewidth=1, alpha=0.7)
             axes[plot_idx].axhline(y=0, color='black', linestyle='--', alpha=0.5)
-            axes[plot_idx].set_title('Residual Component')
+            axes[plot_idx].set_title('Residual Component (→ Stationarity Analysis)')
             axes[plot_idx].set_ylabel(f'{transform} Residual')
             axes[plot_idx].grid(True, alpha=0.3)
 
@@ -470,215 +473,10 @@ class TemporalStructureAnalyzer:
         plt.tight_layout()
         plt.show()
 
-    # =============================================================================
-    # PAIR 4: COMPONENT DIAGNOSTICS - PURE SEPARATION ✅
-    # =============================================================================
-
-    def diagnose_residuals(self,
-                          residual_series: pd.Series,
-                          ljung_box_lags: int = 10,
-                          acf_lags: int = 40,
-                          normality_tests: bool = True) -> Dict[str, Any]:
-        """
-        ✅ PURE ANALYSIS: Residual diagnostic analysis (NO VISUALIZATION)
-        
-        Args:
-            residual_series: Residual component from MSTL
-            ljung_box_lags: Number of lags for Ljung-Box test
-            acf_lags: Number of lags for ACF analysis
-            normality_tests: Whether to perform normality tests
-            
-        Returns:
-            Dict containing residual diagnostic results
-        """
-        print(f"🔍 Residual Diagnostics")
-        print(f"   - Ljung-Box lags: {ljung_box_lags}")
-        print(f"   - ACF lags: {acf_lags}")
-
-        residuals = residual_series.dropna()
-
-        if len(residuals) < 50:
-            return {
-                'success': False,
-                'error': f'Insufficient residual data ({len(residuals)} < 50)'
-            }
-
-        # Basic residual statistics
-        residual_stats = {
-            'count': len(residuals),
-            'mean': residuals.mean(),
-            'std': residuals.std(),
-            'skewness': residuals.skew(),
-            'kurtosis': residuals.kurtosis(),
-            'min': residuals.min(),
-            'max': residuals.max()
-        }
-
-        # Ljung-Box test for autocorrelation
-        ljung_box_results = None
-        autocorr_clean = None
-
-        try:
-            from statsmodels.stats.diagnostic import acorr_ljungbox
-            ljung_box_result = acorr_ljungbox(residuals, lags=ljung_box_lags, return_df=True)
-            significant_lags = ljung_box_result[ljung_box_result['lb_pvalue'] < 0.05]
-
-            ljung_box_results = {
-                'test_results': ljung_box_result,
-                'significant_lags': len(significant_lags),
-                'first_significant_lag': significant_lags.index[0] if len(significant_lags) > 0 else None
-            }
-
-            autocorr_clean = len(significant_lags) == 0
-
-        except Exception as e:
-            print(f"   ⚠️ Ljung-Box test failed: {e}")
-            ljung_box_results = {'error': str(e)}
-
-        # Normality tests
-        normality_results = {}
-        if normality_tests:
-            try:
-                from scipy.stats import shapiro, jarque_bera
-
-                # Shapiro-Wilk test (for smaller samples)
-                if len(residuals) <= 5000:
-                    shapiro_stat, shapiro_p = shapiro(residuals.values)
-                    normality_results['shapiro'] = {
-                        'statistic': shapiro_stat,
-                        'p_value': shapiro_p,
-                        'is_normal': shapiro_p > 0.05
-                    }
-
-                # Jarque-Bera test
-                jb_stat, jb_p = jarque_bera(residuals.values)
-                normality_results['jarque_bera'] = {
-                    'statistic': jb_stat,
-                    'p_value': jb_p,
-                    'is_normal': jb_p > 0.05
-                }
-
-            except Exception as e:
-                normality_results['error'] = str(e)
-
-        print(f"   - Mean: {residual_stats['mean']:.6f}")
-        print(f"   - Std: {residual_stats['std']:.6f}")
-        if ljung_box_results and 'significant_lags' in ljung_box_results:
-            if autocorr_clean:
-                print(f"   ✅ No significant autocorrelation")
-            else:
-                print(f"   ⚠️ Autocorrelation detected at {ljung_box_results['significant_lags']} lags")
-
-        return {
-            'success': True,
-            'residuals': residuals,
-            'residual_stats': residual_stats,
-            'ljung_box_results': ljung_box_results,
-            'normality_results': normality_results,
-            'autocorr_clean': autocorr_clean,
-            'parameters': {
-                'ljung_box_lags': ljung_box_lags,
-                'acf_lags': acf_lags
-            }
-        }
-
-    def plot_residual_diagnostics(self,
-                                 residual_results: Dict[str, Any],
-                                 figsize: Tuple[int, int] = (15, 10),
-                                 hist_bins: int = 50,
-                                 layout: str = '2x2') -> None:
-        """
-        ✅ PURE VISUALIZATION: Plot residual diagnostics (NO ANALYSIS)
-        
-        Args:
-            residual_results: Results from diagnose_residuals()
-            figsize: Figure size
-            hist_bins: Number of bins for histogram
-            layout: Plot layout ('2x2', '3x2', '1x4')
-        """
-        if not residual_results['success']:
-            print("❌ Cannot plot diagnostics: Residual analysis failed")
-            return
-
-        residuals = residual_results['residuals']
-        acf_lags = residual_results['parameters']['acf_lags']
-
-        # Determine subplot layout
-        if layout == '2x2':
-            nrows, ncols = 2, 2
-        elif layout == '3x2':
-            nrows, ncols = 3, 2
-        elif layout == '1x4':
-            nrows, ncols = 1, 4
-        else:
-            nrows, ncols = 2, 2
-
-        fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
-        if nrows * ncols == 1:
-            axes = [axes]
-        else:
-            axes = axes.flatten()
-
-        fig.suptitle('Residual Diagnostic Analysis', fontsize=16, fontweight='bold')
-
-        plot_idx = 0
-
-        # Time series plot
-        axes[plot_idx].plot(residuals.index, residuals.values, 'purple', alpha=0.7, linewidth=1)
-        axes[plot_idx].axhline(y=0, color='red', linestyle='--', alpha=0.7)
-        axes[plot_idx].set_title('Residuals Over Time')
-        axes[plot_idx].set_ylabel('Residual')
-        axes[plot_idx].grid(True, alpha=0.3)
-        plot_idx += 1
-
-        # Histogram
-        axes[plot_idx].hist(residuals.values, bins=hist_bins, alpha=0.7,
-                           color='purple', density=True, edgecolor='black')
-        axes[plot_idx].set_title('Residual Distribution')
-        axes[plot_idx].set_xlabel('Residual Value')
-        axes[plot_idx].set_ylabel('Density')
-        axes[plot_idx].grid(True, alpha=0.3)
-        plot_idx += 1
-
-        # ACF plot
-        try:
-            from statsmodels.graphics.tsaplots import plot_acf
-            plot_acf(residuals, ax=axes[plot_idx], lags=acf_lags, alpha=0.05)
-            axes[plot_idx].set_title(f'ACF of Residuals (lags={acf_lags})')
-        except Exception as e:
-            axes[plot_idx].set_title('ACF Plot Not Available')
-            axes[plot_idx].text(0.5, 0.5, f'Error: {str(e)}',
-                               transform=axes[plot_idx].transAxes, ha='center')
-        plot_idx += 1
-
-        # Q-Q plot
-        try:
-            probplot(residuals.values, dist="norm", plot=axes[plot_idx])
-            axes[plot_idx].set_title('Q-Q Plot (Normal)')
-        except Exception as e:
-            axes[plot_idx].set_title('Q-Q Plot Not Available')
-            axes[plot_idx].text(0.5, 0.5, f'Error: {str(e)}',
-                               transform=axes[plot_idx].transAxes, ha='center')
-        plot_idx += 1
-
-        # Hide unused subplots
-        for i in range(plot_idx, len(axes)):
-            axes[i].set_visible(False)
-
-        plt.tight_layout()
-        plt.show()
-
-        # Print diagnostic summary
-        stats = residual_results['residual_stats']
-        print(f"\n📊 Residual Summary:")
-        print(f"   - Count: {stats['count']:,}")
-        print(f"   - Mean: {stats['mean']:.6f}")
-        print(f"   - Std: {stats['std']:.6f}")
-        print(f"   - Skewness: {stats['skewness']:.4f}")
-        print(f"   - Kurtosis: {stats['kurtosis']:.4f}")
+        print(f"   📤 Residual component ready for Stationarity analysis")
 
     # =============================================================================
-    # PAIR 5: WAVELET ANALYSIS - PURE SEPARATION ✅
+    # PAIR 4: WAVELET ANALYSIS - PURE SEPARATION ✅
     # =============================================================================
 
     def analyze_wavelet(self,
@@ -705,7 +503,7 @@ class TemporalStructureAnalyzer:
 
         try:
             import pywt
-            
+
             # Prepare time series data
             ts_data = self.df.set_index(self.date_col).sort_index()
             target_ts = ts_data[self.target_col].dropna()
@@ -715,7 +513,7 @@ class TemporalStructureAnalyzer:
             if len(target_ts) > analysis_duration_days:
                 target_ts = target_ts.tail(analysis_duration_days)
                 print(f"   📊 Using last {analysis_duration_years} years ({len(target_ts)} days)")
-            
+
             data = target_ts.values
             dates = target_ts.index
 
@@ -801,13 +599,13 @@ class TemporalStructureAnalyzer:
         """
         try:
             from scipy.signal import cwt, morlet2
-            
+
             print(f"   🔄 Using scipy.signal CWT fallback...")
             
             # Prepare simplified time series
             ts_data = self.df.set_index(self.date_col).sort_index()
             target_ts = ts_data[self.target_col].dropna()
-            
+
             # Use last year only for scipy fallback
             target_ts = target_ts.tail(365)
             data = target_ts.values
@@ -815,16 +613,16 @@ class TemporalStructureAnalyzer:
             
             # Simplified scales
             scales = np.logspace(1, 2, 20)  # 20 scales from 10 to 100
-            
+
             # Perform CWT
             coefficients = cwt(data, morlet2, scales)
             power = np.abs(coefficients) ** 2
             
             # Approximate periods
             periods = scales * 2  # Rough approximation
-            
+
             print(f"   ✅ Scipy fallback completed")
-            
+
             return {
                 'success': True,
                 'coefficients': coefficients,
@@ -842,7 +640,7 @@ class TemporalStructureAnalyzer:
                     'fallback': True
                 }
             }
-            
+
         except Exception as e:
             print(f"   ❌ Scipy fallback also failed: {e}")
             return {
@@ -965,18 +763,19 @@ class TemporalStructureAnalyzer:
                 print(f"     {i}. {period:.1f} days")
 
     # =============================================================================
-    # MAIN ORCHESTRATION - CONVENIENCE METHODS (UPDATED)
+    # MAIN ORCHESTRATION - CONVENIENCE METHODS (UPDATED - NO RESIDUAL ANALYSIS)
     # =============================================================================
 
     def analyze_all(self) -> Dict[str, Any]:
         """
         Convenience method: Run all analyses with default parameters
+        ✅ UPDATED: No residual analysis (now handled by Stationarity)
         
         Returns:
-            Dict containing all analysis results
+            Dict containing all analysis results + residual for Stationarity
         """
         print("\n" + "="*70)
-        print("🕐 TEMPORAL STRUCTURE ANALYSIS - 5 PAIRS REFACTORED")
+        print("🕐 TEMPORAL STRUCTURE ANALYSIS - 4 PAIRS REFACTORED")
         print("="*70)
 
         # Step 1: Seasonal patterns analysis
@@ -985,34 +784,30 @@ class TemporalStructureAnalyzer:
         # Step 2: FFT frequency analysis
         fft_results = self.analyze_fft()
 
-        # Step 3: MSTL decomposition
+        # Step 3: MSTL decomposition (returns residual for Stationarity)
         periods = fft_results.get('dominant_periods', [7, 30, 365])[:3]  # Use top 3
         mstl_results = self.decompose_mstl(periods)
 
-        # Step 4: Component diagnostics
-        residual_results = {}
-        if mstl_results['success']:
-            residual_results = self.diagnose_residuals(mstl_results['resid'])
-
-        # Step 5: Wavelet analysis (NEW)
+        # Step 4: Wavelet analysis
         wavelet_results = self.analyze_wavelet()
 
         # Combine all results
         results = {
             'seasonal_patterns': seasonal_results,
             'frequency_analysis': fft_results,
-            'mstl_decomposition': mstl_results,
-            'residual_analysis': residual_results,
+            'mstl_decomposition': mstl_results,  # ✅ Contains residual for Stationarity
             'wavelet_analysis': wavelet_results,
-            'component_name': 'TemporalStructureAnalyzer_5Pairs_Complete'
+            'component_name': 'TemporalStructureAnalyzer_4Pairs_NoResidualAnalysis'
         }
 
-        print(f"\n✅ TEMPORAL ANALYSIS COMPLETED - 5 PAIRS IMPLEMENTED")
+        print(f"\n✅ TEMPORAL ANALYSIS COMPLETED - 4 PAIRS IMPLEMENTED")
+        print(f"   📤 MSTL residual ready for Stationarity analysis")
         return results
 
     def visualize_all(self, results: Dict[str, Any]) -> None:
         """
         Convenience method: Visualize all components
+        ✅ UPDATED: No residual diagnostics visualization
         
         Args:
             results: Results from analyze_all()
@@ -1026,24 +821,27 @@ class TemporalStructureAnalyzer:
         if results['frequency_analysis']['success']:
             self.plot_spectrum(results['frequency_analysis'])
 
-        # 3. MSTL decomposition
+        # 3. MSTL decomposition (shows residual for reference)
         if results['mstl_decomposition']['success']:
             self.plot_decomposition(results['mstl_decomposition'])
 
-        # 4. Residual diagnostics
-        if results['residual_analysis'].get('success'):
-            self.plot_residual_diagnostics(results['residual_analysis'])
-
-        # 5. Wavelet scalogram (NEW)
+        # 4. Wavelet scalogram
         if results['wavelet_analysis']['success']:
             self.plot_scalogram(results['wavelet_analysis'])
 
-# ✅ EXPORT CONVENIENCE FUNCTION
+        print(f"\n📋 Note: Residual analysis is now handled by StationarityAutocorrelationAnalyzer")
+
+
+# =============================================================================
+# CONVENIENCE FUNCTIONS
+# =============================================================================
+
 def analyze_temporal_structure(df: pd.DataFrame, 
                               target_col: str = None, 
                               date_col: str = None) -> Dict[str, Any]:
     """
     Convenience function for complete temporal analysis
+    ✅ UPDATED: Returns residual for Stationarity analysis
     
     Args:
         df: DataFrame with time series data
@@ -1051,7 +849,32 @@ def analyze_temporal_structure(df: pd.DataFrame,
         date_col: Date column name
         
     Returns:
-        Dict containing all analysis results
+        Dict containing all analysis results including residual for Stationarity
     """
     analyzer = TemporalStructureAnalyzer(df, target_col, date_col)
     return analyzer.analyze_all()
+
+def get_mstl_residual_for_stationarity(df: pd.DataFrame,
+                                      target_col: str = None,
+                                      date_col: str = None,
+                                      periods: List[int] = [7, 30, 365]) -> Optional[pd.Series]:
+    """
+    Convenience function to get MSTL residual for Stationarity analysis
+    
+    Args:
+        df: DataFrame with time series data
+        target_col: Target column name
+        date_col: Date column name
+        periods: Seasonal periods for MSTL
+        
+    Returns:
+        MSTL residual series or None if failed
+    """
+    analyzer = TemporalStructureAnalyzer(df, target_col, date_col)
+    mstl_results = analyzer.decompose_mstl(periods)
+    
+    if mstl_results['success']:
+        return mstl_results['resid']
+    else:
+        print(f"⚠️ MSTL decomposition failed: {mstl_results.get('error', 'Unknown error')}")
+        return None

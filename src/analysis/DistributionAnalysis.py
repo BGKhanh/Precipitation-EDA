@@ -157,10 +157,7 @@ class DistributionAnalyzer:
     def analyze_target_variable(self) -> Dict[str, Any]:
         """
         Deep analysis of target variable (precipitation)
-        Based on ds.py lines 136-245
-        
-        Returns:
-            Dictionary with target variable analysis results
+        Updated to use Config constants
         """
         print("\n" + "="*80)
         print(f"🎯 2. TARGET VARIABLE DEEP ANALYSIS: {self.target_col}")
@@ -221,19 +218,28 @@ class DistributionAnalyzer:
             kurt_interpretation = "Mesokurtic (gần normal)"
         print(f"     → Interpretation: {kurt_interpretation}")
         
-        # Vietnamese Meteorological Standards Classification
+        # Vietnamese Meteorological Standards Classification using Config
         intensity_dist = self._classify_precipitation_intensity(target_data)
         total_days = len(target_data)
+        categories = Config.PRECIPITATION_CLASSIFICATION["categories"]
         
         print(f"\n🌧️ Vietnamese Meteorological Standards Classification (24h):")
         print("   Based on Vietnamese National Weather Service Standards")
-        print(f"   - Không mưa (No Rain): {intensity_dist['no_rain']:,} days ({intensity_dist['no_rain']/total_days*100:.2f}%)")
-        print(f"   - Mưa lượng không đáng kể (0-0.6mm): {intensity_dist['trace_rain']:,} days ({intensity_dist['trace_rain']/total_days*100:.2f}%)")
-        print(f"   - Mưa nhỏ (0.6-6.0mm): {intensity_dist['light_rain']:,} days ({intensity_dist['light_rain']/total_days*100:.2f}%)")
-        print(f"   - Mưa (6.0-16.0mm): {intensity_dist['moderate_rain']:,} days ({intensity_dist['moderate_rain']/total_days*100:.2f}%)")
-        print(f"   - Mưa vừa (16.0-50.0mm): {intensity_dist['heavy_rain']:,} days ({intensity_dist['heavy_rain']/total_days*100:.2f}%)")
-        print(f"   - Mưa to (50.0-100.0mm): {intensity_dist['very_heavy_rain']:,} days ({intensity_dist['very_heavy_rain']/total_days*100:.2f}%)")
-        print(f"   - Mưa rất to (>100.0mm): {intensity_dist['extremely_heavy_rain']:,} days ({intensity_dist['extremely_heavy_rain']/total_days*100:.2f}%)")
+        
+        for category_key, count in intensity_dist.items():
+            category_info = categories[category_key]
+            min_val, max_val = category_info["range"]
+            label_vi = category_info["label_vi"]
+            
+            if max_val == float('inf'):
+                range_str = f">{min_val}mm"
+            elif min_val == max_val == 0:
+                range_str = "0mm"
+            else:
+                range_str = f"{min_val}-{max_val}mm"
+            
+            percentage = count/total_days*100
+            print(f"   - {label_vi} ({range_str}): {count:,} days ({percentage:.2f}%)")
         
         return {
             'basic_stats': {
@@ -450,16 +456,28 @@ class DistributionAnalyzer:
         }
     
     def _classify_precipitation_intensity(self, data: pd.Series) -> Dict[str, int]:
-        """Classify precipitation by Vietnamese meteorological standards"""
-        return {
-            'no_rain': (data == 0).sum(),
-            'trace_rain': ((data > 0) & (data <= 0.6)).sum(),
-            'light_rain': ((data > 0.6) & (data <= 6.0)).sum(),
-            'moderate_rain': ((data > 6.0) & (data <= 16.0)).sum(),
-            'heavy_rain': ((data > 16.0) & (data <= 50.0)).sum(),
-            'very_heavy_rain': ((data > 50.0) & (data <= 100.0)).sum(),
-            'extremely_heavy_rain': (data > 100.0).sum()
-        }
+        """
+        Classify precipitation by Vietnamese meteorological standards
+        Now using Config constants for consistency
+        """
+        categories = Config.PRECIPITATION_CLASSIFICATION["categories"]
+        
+        classification = {}
+        for category_key, category_info in categories.items():
+            min_val, max_val = category_info["range"]
+            
+            if category_key == "no_rain":
+                count = (data == 0).sum()
+            elif category_key == "trace_rain":
+                count = ((data > 0) & (data <= 0.6)).sum()
+            elif max_val == float('inf'):
+                count = (data > min_val).sum()
+            else:
+                count = ((data > min_val) & (data <= max_val)).sum()
+            
+            classification[category_key] = count
+        
+        return classification
     
     def _run_normality_tests(self, data: pd.Series, col_name: str) -> Dict[str, Any]:
         """

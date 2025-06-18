@@ -57,6 +57,56 @@ class Config:
         "LONGITUDE": "Kinh độ"
     }
     
+    # Vietnamese Meteorological Standards Classification (24h precipitation)
+    # Based on Vietnamese National Weather Service Standards
+    PRECIPITATION_CLASSIFICATION = {
+        "categories": {
+            "no_rain": {
+                "range": (0, 0),
+                "label_vi": "Không mưa",
+                "label_en": "No Rain",
+                "description": "No precipitation"
+            },
+            "trace_rain": {
+                "range": (0, 0.6),
+                "label_vi": "Mưa lượng không đáng kể",
+                "label_en": "Trace Rain",
+                "description": "Negligible precipitation"
+            },
+            "light_rain": {
+                "range": (0.6, 6.0),
+                "label_vi": "Mưa nhỏ",
+                "label_en": "Light Rain",
+                "description": "Light precipitation"
+            },
+            "moderate_rain": {
+                "range": (6.0, 16.0),
+                "label_vi": "Mưa",
+                "label_en": "Moderate Rain",
+                "description": "Moderate precipitation"
+            },
+            "heavy_rain": {
+                "range": (16.0, 50.0),
+                "label_vi": "Mưa vừa",
+                "label_en": "Heavy Rain",
+                "description": "Heavy precipitation"
+            },
+            "very_heavy_rain": {
+                "range": (50.0, 100.0),
+                "label_vi": "Mưa to",
+                "label_en": "Very Heavy Rain",
+                "description": "Very heavy precipitation"
+            },
+            "extremely_heavy_rain": {
+                "range": (100.0, float('inf')),
+                "label_vi": "Mưa rất to",
+                "label_en": "Extremely Heavy Rain",
+                "description": "Extremely heavy precipitation"
+            }
+        },
+        "thresholds": [0, 0.6, 6.0, 16.0, 50.0, 100.0]  # For easy access
+    }
+    
     # Default date range
     DEFAULT_START_DATE = "20000101"
     DEFAULT_END_DATE = "20250430"

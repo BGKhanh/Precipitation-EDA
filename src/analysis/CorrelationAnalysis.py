@@ -1,7 +1,8 @@
 # =============================================================================
-# ENHANCED PART B: COMPREHENSIVE CORRELATION ANALYSIS (CLEANED)
+# COMPONENT 4: CORRELATION ANALYSIS (REFACTORED)
 # =============================================================================
 
+from typing import Dict, List, Tuple, Any, Optional
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,6 +15,9 @@ from sklearn.decomposition import PCA
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 import networkx as nx
 import warnings
+
+from ..config.constants import Config
+
 warnings.filterwarnings('ignore')
 
 # Set plotting style
@@ -22,107 +26,85 @@ sns.set_palette("RdYlBu_r")
 plt.rcParams['figure.figsize'] = (15, 10)
 plt.rcParams['font.size'] = 10
 
-class CityLevelCorrelationAnalyzer:
+
+class CorrelationAnalyzer:
     """
-    Enhanced Comprehensive Correlation Analysis for City-Level Weather Data
-    Unified: Static, Dynamic, Lagged, Multicollinearity & Network Analysis
+    Comprehensive Correlation Analysis for Weather Data
+    ✅ REFACTORED: Loại bỏ BaseAnalyzer, standalone module
     """
 
-    def __init__(self, df, target_col='Lượng mưa', date_col='Ngày'):
-        """Initialize City-Level Correlation Analyzer"""
+    def __init__(self, 
+                 df: pd.DataFrame, 
+                 target_col: str = None,
+                 date_col: str = None) -> None:
+        """
+        Initialize Correlation Analyzer
+        
+        Args:
+            df: Weather data DataFrame
+            target_col: Target variable column name (defaults to Config)
+            date_col: Date column name (defaults to Config)
+        """
         self.df = df.copy()
-        self.target_col = target_col
-        self.date_col = date_col
+        self.target_col = target_col or Config.COLUMN_MAPPING.get('PRECTOTCORR', 'Lượng mưa')
+        self.date_col = date_col or Config.COLUMN_MAPPING.get('DATE', 'Ngày')
 
-        # Exclude non-predictive columns for city-level data
-        exclude_cols = ['Vĩ độ', 'Kinh độ', 'Ngày', 'Nhóm']
+        # Use Config for column identification
+        coord_cols = [Config.COLUMN_MAPPING.get('LATITUDE', 'Vĩ độ'),
+                     Config.COLUMN_MAPPING.get('LONGITUDE', 'Kinh độ')]
+        exclude_cols = coord_cols + [self.date_col, 'Nhóm']
 
         # Get numerical columns for analysis
         self.numerical_cols = self.df.select_dtypes(include=[np.number]).columns.tolist()
         self.analysis_cols = [col for col in self.numerical_cols if col not in exclude_cols]
-
-        # Separate predictors from target
         self.predictor_cols = [col for col in self.analysis_cols if col != self.target_col]
 
-        print("🔍 CITY-LEVEL ADVANCED CORRELATION ANALYZER INITIALIZED")
+        print("🔍 CORRELATION ANALYZER INITIALIZED")
         print("="*70)
         print(f"   📊 Dataset Shape: {self.df.shape}")
         print(f"   🎯 Target Variable: {self.target_col}")
-        print(f"   📍 Geographic Scope: Ho Chi Minh City (Single Location)")
         print(f"   🔢 Total Features: {len(self.analysis_cols)}")
         print(f"   📈 Predictor Features: {len(self.predictor_cols)}")
 
-    def meteorological_correlation_matrix(self):
-        """1. Specialized correlation matrix for meteorological variables"""
+    def analyze_meteorological_correlations(self) -> Dict[str, Any]:
+        """
+        Analyze meteorological variable correlations
+        
+        Returns:
+            Dictionary with correlation matrices and feature groups
+        """
         print("\n" + "="*70)
         print("🌤️ 1. METEOROLOGICAL CORRELATION MATRIX ANALYSIS")
         print("="*70)
 
-        # Group features by meteorological categories
-        feature_groups = {
-            'Temperature': [col for col in self.analysis_cols if 'Nhiệt độ' in col or 'Điểm sương' in col or 'bầu ướt' in col],
-            'Humidity': [col for col in self.analysis_cols if 'Độ ẩm' in col],
-            'Wind': [col for col in self.analysis_cols if 'gió' in col or 'Hướng' in col or 'Tốc độ' in col],
-            'Pressure_Radiation': [col for col in self.analysis_cols if 'Áp suất' in col or 'Bức xạ' in col],
-            'Precipitation': [self.target_col]
-        }
+        # Group features by meteorological categories using Config
+        feature_groups = self._categorize_meteorological_features()
 
         print(f"📊 Meteorological Feature Groups:")
         for group, features in feature_groups.items():
             print(f"   - {group}: {len(features)} features")
 
         # Calculate correlations
-        correlations = {}
-        correlations['pearson'] = self.df[self.analysis_cols].corr(method='pearson')
-        correlations['spearman'] = self.df[self.analysis_cols].corr(method='spearman')
+        correlations = {
+            'pearson': self.df[self.analysis_cols].corr(method='pearson'),
+            'spearman': self.df[self.analysis_cols].corr(method='spearman')
+        }
 
-        # Visualization
-        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
-        fig.suptitle('Meteorological Cross-Correlation Analysis - Ho Chi Minh City',
-                     fontsize=16, fontweight='bold')
+        return {
+            'correlations': correlations,
+            'feature_groups': feature_groups,
+            'target_correlations': correlations['pearson'][self.target_col].drop(self.target_col)
+        }
 
-        # Pearson correlation
-        mask = np.triu(np.ones_like(correlations['pearson'], dtype=bool))
-        sns.heatmap(correlations['pearson'], mask=mask, annot=True,
-                   cmap='RdBu_r', center=0, square=True, linewidths=.5,
-                   cbar_kws={"shrink": .8}, fmt='.2f', ax=axes[0,0])
-        axes[0,0].set_title('Pearson Correlation (Linear Relationships)', fontweight='bold')
-
-        # Spearman correlation
-        sns.heatmap(correlations['spearman'], mask=mask, annot=True,
-                   cmap='RdBu_r', center=0, square=True, linewidths=.5,
-                   cbar_kws={"shrink": .8}, fmt='.2f', ax=axes[0,1])
-        axes[0,1].set_title('Spearman Correlation (Monotonic Relationships)', fontweight='bold')
-
-        # Target variable focus
-        target_corr = correlations['pearson'][self.target_col].drop(self.target_col).sort_values(key=abs, ascending=False)
-        bars = axes[1,0].barh(range(len(target_corr)), target_corr.values,
-                             color=['red' if x > 0 else 'blue' for x in target_corr.values], alpha=0.7)
-        axes[1,0].set_yticks(range(len(target_corr)))
-        axes[1,0].set_yticklabels(target_corr.index, fontsize=9)
-        axes[1,0].set_title(f'Correlations with {self.target_col}', fontweight='bold')
-        axes[1,0].set_xlabel('Correlation Coefficient')
-        axes[1,0].grid(True, alpha=0.3)
-
-        # Nonlinearity detection
-        diff_matrix = correlations['spearman'] - correlations['pearson']
-        sns.heatmap(diff_matrix, mask=mask, annot=True,
-                   cmap='RdYlGn', center=0, square=True, linewidths=.5,
-                   cbar_kws={"shrink": .8}, fmt='.2f', ax=axes[1,1])
-        axes[1,1].set_title('Nonlinearity Detection (Spearman - Pearson)', fontweight='bold')
-
-        plt.tight_layout()
-        plt.show()
-
-        return correlations, feature_groups
-
-    def temporal_correlation_dynamics(self):
+    def analyze_temporal_dynamics(self) -> Dict[str, Any]:
         """
-        2. UNIFIED Temporal Correlation Dynamics Analysis
-        Combines: Seasonal, Rolling, Lagged Analysis
+        Analyze temporal correlation dynamics
+        
+        Returns:
+            Dictionary with seasonal, rolling, and lagged correlation results
         """
         print("\n" + "="*70)
-        print("📅 2. ENHANCED TEMPORAL CORRELATION DYNAMICS")
+        print("📅 2. TEMPORAL CORRELATION DYNAMICS")
         print("="*70)
 
         # Ensure datetime format
@@ -131,10 +113,268 @@ class CityLevelCorrelationAnalyzer:
 
         results = {}
 
-        # 2.1 Seasonal Analysis
-        print(f"🌤️ 2.1 Seasonal Correlation Analysis")
-        print("-" * 50)
+        # Seasonal analysis
+        results['seasonal_correlations'] = self._analyze_seasonal_correlations()
+        
+        # Rolling correlations
+        results['rolling_correlations'] = self._analyze_rolling_correlations()
+        
+        # Lagged correlations
+        results['lagged_correlations'] = self._analyze_lagged_correlations()
 
+        return results
+
+    def analyze_multicollinearity(self) -> pd.DataFrame:
+        """
+        Analyze multicollinearity using VIF scores
+        
+        Returns:
+            DataFrame with VIF scores and risk levels
+        """
+        print("\n" + "="*70)
+        print("🔍 3. MULTICOLLINEARITY ANALYSIS")
+        print("="*70)
+
+        X = self.df[self.predictor_cols].dropna()
+        vif_data = []
+
+        try:
+            from statsmodels.tools.tools import add_constant
+            X_with_const = add_constant(X)
+
+            for i, col in enumerate(X.columns):
+                vif_score = variance_inflation_factor(X_with_const.values, i+1)
+                vif_data.append({
+                    'Feature': col,
+                    'VIF_Score': vif_score,
+                    'Category': self._categorize_feature(col),
+                    'Risk_Level': self._interpret_vif(vif_score)
+                })
+
+        except Exception as e:
+            print(f"   ⚠️ VIF calculation error: {e}")
+            # Fallback: correlation-based detection
+            corr_matrix = X.corr()
+            for col in X.columns:
+                max_corr = corr_matrix[col].drop(col).abs().max()
+                vif_score = 1/(1-max_corr**2) if max_corr < 0.99 else 100
+                vif_data.append({
+                    'Feature': col,
+                    'VIF_Score': vif_score,
+                    'Category': self._categorize_feature(col),
+                    'Risk_Level': self._interpret_vif(vif_score)
+                })
+
+        if vif_data:
+            vif_df = pd.DataFrame(vif_data).sort_values('VIF_Score', ascending=False)
+            print(f"📊 Multicollinearity Analysis Results:")
+            print(vif_df.head(10).to_string(index=False))
+            return vif_df
+        
+        return pd.DataFrame()
+
+    def analyze_feature_clustering(self) -> Dict[str, Any]:
+        """
+        Analyze feature clustering using hierarchical clustering and PCA
+        
+        Returns:
+            Dictionary with clustering and PCA results
+        """
+        print("\n" + "="*70)
+        print("🔬 4. FEATURE CLUSTERING & PCA ANALYSIS")
+        print("="*70)
+
+        X = self.df[self.predictor_cols].dropna()
+
+        # Standardize features
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        X_scaled_df = pd.DataFrame(X_scaled, columns=self.predictor_cols, index=X.index)
+
+        # Hierarchical clustering
+        corr_matrix = X_scaled_df.corr()
+        distance_matrix = 1 - np.abs(corr_matrix)
+        condensed_distances = squareform(distance_matrix.values)
+        linkage_matrix = linkage(condensed_distances, method='ward')
+
+        # Get clusters
+        n_clusters = min(5, len(self.predictor_cols)//3)
+        cluster_labels = fcluster(linkage_matrix, n_clusters, criterion='maxclust')
+
+        # Create feature clusters
+        feature_clusters = {}
+        for i, feature in enumerate(self.predictor_cols):
+            cluster_id = cluster_labels[i]
+            if cluster_id not in feature_clusters:
+                feature_clusters[cluster_id] = []
+            feature_clusters[cluster_id].append(feature)
+
+        print(f"   📊 Features grouped into {n_clusters} clusters:")
+        for cluster_id, features in feature_clusters.items():
+            print(f"   Cluster {cluster_id}: {len(features)} features")
+
+        # PCA analysis
+        pca = PCA()
+        pca_result = pca.fit_transform(X_scaled)
+
+        # Calculate PC correlations with target
+        target_values = self.df.loc[X.index, self.target_col]
+        pc_target_correlations = []
+
+        for i in range(min(5, len(self.predictor_cols))):
+            pc_corr = np.corrcoef(pca_result[:, i], target_values)[0, 1]
+            pc_target_correlations.append({
+                'PC': f'PC{i+1}',
+                'Explained_Variance': pca.explained_variance_ratio_[i],
+                'Target_Correlation': pc_corr
+            })
+
+        pc_df = pd.DataFrame(pc_target_correlations)
+        print("   📈 Principal Components vs Target:")
+        print(pc_df.to_string(index=False, float_format='%.3f'))
+
+        return {
+            'feature_clusters': feature_clusters,
+            'pca_results': pc_df,
+            'explained_variance_ratio': pca.explained_variance_ratio_,
+            'linkage_matrix': linkage_matrix
+        }
+
+    def analyze_feature_network(self) -> Tuple[nx.Graph, List]:
+        """
+        Analyze feature interaction network
+        
+        Returns:
+            NetworkX graph and edge list
+        """
+        print("\n" + "="*70)
+        print("🕸️ 5. FEATURE INTERACTION NETWORK")
+        print("="*70)
+
+        corr_matrix = self.df[self.analysis_cols].corr()
+        G = nx.Graph()
+
+        # Add nodes
+        for feature in self.analysis_cols:
+            category = self._categorize_feature(feature)
+            G.add_node(feature, category=category, is_target=(feature == self.target_col))
+
+        # Add edges for significant correlations
+        correlation_threshold = 0.25
+        edges = []
+        for i, feature1 in enumerate(self.analysis_cols):
+            for j, feature2 in enumerate(self.analysis_cols):
+                if i < j:
+                    corr_val = corr_matrix.loc[feature1, feature2]
+                    if abs(corr_val) >= correlation_threshold:
+                        G.add_edge(feature1, feature2, weight=abs(corr_val), correlation=corr_val)
+                        edges.append((feature1, feature2, corr_val))
+
+        print(f"🕸️ Network: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+        print(f"   Density: {nx.density(G):.3f}")
+
+        return G, edges
+
+    def generate_insights_report(self) -> Dict[str, Any]:
+        """
+        Generate comprehensive correlation analysis report
+        
+        Returns:
+            Complete analysis results with insights
+        """
+        print("\n" + "="*70)
+        print("📋 6. CORRELATION ANALYSIS INSIGHTS REPORT")
+        print("="*70)
+
+        # Run all analyses
+        meteorological_results = self.analyze_meteorological_correlations()
+        temporal_results = self.analyze_temporal_dynamics()
+        multicollinearity_results = self.analyze_multicollinearity()
+        clustering_results = self.analyze_feature_clustering()
+        network, edges = self.analyze_feature_network()
+
+        # Generate insights
+        correlations = meteorological_results['correlations']
+        target_corr = correlations['pearson'][self.target_col].drop(self.target_col).abs().sort_values(ascending=False)
+        
+        strong_predictors = target_corr[target_corr > 0.3]
+        moderate_predictors = target_corr[(target_corr > 0.2) & (target_corr <= 0.3)]
+
+        print(f"\n🎯 CORRELATION ANALYSIS EXECUTIVE SUMMARY:")
+        print("="*60)
+        print(f"🌧️ PRECIPITATION PREDICTION INSIGHTS:")
+        print(f"   - Strong predictors (|r| > 0.3): {len(strong_predictors)}")
+        print(f"   - Moderate predictors (0.2 < |r| ≤ 0.3): {len(moderate_predictors)}")
+
+        # Temporal insights
+        if temporal_results['rolling_correlations']:
+            print(f"\n📈 DYNAMIC CORRELATION INSIGHTS:")
+            for var, results in temporal_results['rolling_correlations'].items():
+                stability = "Stable" if results['std_correlation'] < 0.1 else "Variable"
+                print(f"   - {var}: {stability} correlation")
+
+        # Clustering insights
+        print(f"\n🔬 CLUSTERING INSIGHTS:")
+        print(f"   - Feature clusters identified: {len(clustering_results['feature_clusters'])}")
+        if len(clustering_results['pca_results']) > 0:
+            top_pc = clustering_results['pca_results'].iloc[0]
+            print(f"   - Top PC explains {top_pc['Explained_Variance']:.1%} variance")
+
+        return {
+            'meteorological_results': meteorological_results,
+            'temporal_results': temporal_results,
+            'multicollinearity_results': multicollinearity_results,
+            'clustering_results': clustering_results,
+            'network': network,
+            'strong_predictors': strong_predictors,
+            'moderate_predictors': moderate_predictors
+        }
+
+    def _categorize_meteorological_features(self) -> Dict[str, List[str]]:
+        """Categorize features by meteorological types using Config"""
+        feature_groups = {
+            'Temperature': [],
+            'Humidity': [],
+            'Wind': [],
+            'Pressure_Radiation': [],
+            'Precipitation': [self.target_col]
+        }
+
+        for col in self.analysis_cols:
+            if col == self.target_col:
+                continue
+            category = self._categorize_feature(col)
+            if category in feature_groups:
+                feature_groups[category].append(col)
+
+        return feature_groups
+
+    def _categorize_feature(self, feature_name: str) -> str:
+        """Helper function to categorize meteorological features"""
+        if any(term in feature_name for term in ['Nhiệt độ', 'Điểm sương', 'bầu ướt']):
+            return 'Temperature'
+        elif 'Độ ẩm' in feature_name:
+            return 'Humidity'
+        elif any(term in feature_name for term in ['gió', 'Hướng', 'Tốc độ']):
+            return 'Wind'
+        elif any(term in feature_name for term in ['Áp suất', 'Bức xạ']):
+            return 'Pressure_Radiation'
+        elif feature_name == self.target_col:
+            return 'Precipitation'
+        else:
+            return 'Other'
+
+    def _interpret_vif(self, vif_score: float) -> str:
+        """Helper function to interpret VIF scores"""
+        if vif_score < 5:
+            return "Low"
+        elif vif_score < 10:
+            return "Moderate"
+        else:
+            return "High"
+
+    def _analyze_seasonal_correlations(self) -> Dict[str, pd.Series]:
+        """Analyze seasonal correlation patterns"""
         df_temp = self.df.copy()
         df_temp['Month'] = df_temp[self.date_col].dt.month
         df_temp['Season'] = df_temp['Month'].map({
@@ -152,39 +392,10 @@ class CityLevelCorrelationAnalyzer:
             if len(season_data) > 30:
                 seasonal_correlations[season] = season_data[self.analysis_cols].corr()[self.target_col].drop(self.target_col)
 
-        if seasonal_correlations:
-            correlation_df = pd.DataFrame(seasonal_correlations)
+        return seasonal_correlations
 
-            plt.figure(figsize=(16, 10))
-
-            # Seasonal correlation heatmap
-            plt.subplot(2, 2, 1)
-            sns.heatmap(correlation_df.T, annot=True, cmap='RdBu_r', center=0,
-                       cbar_kws={"shrink": .8}, fmt='.2f')
-            plt.title('Seasonal Correlation Patterns', fontweight='bold')
-
-            # Top predictors seasonal changes
-            plt.subplot(2, 2, 2)
-            top_predictors = correlation_df.abs().max(axis=1).nlargest(5).index
-            for predictor in top_predictors:
-                plt.plot(seasons, [correlation_df.loc[predictor, season] for season in seasons],
-                        'o-', linewidth=2, label=predictor[:15], alpha=0.8)
-            plt.title('Top Predictors Seasonal Changes', fontweight='bold')
-            plt.xlabel('Season')
-            plt.ylabel('Correlation')
-            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-            plt.grid(True, alpha=0.3)
-            plt.xticks(rotation=45)
-
-            plt.tight_layout()
-            plt.show()
-
-        results['seasonal_correlations'] = seasonal_correlations
-
-        # 2.2 Rolling Correlations (Simplified)
-        print(f"\n📈 2.2 Rolling Correlation Analysis")
-        print("-" * 50)
-
+    def _analyze_rolling_correlations(self) -> Dict[str, Dict[str, float]]:
+        """Analyze rolling correlation patterns"""
         daily_agg = self.df.groupby(self.date_col)[self.analysis_cols].mean().reset_index()
         daily_agg = daily_agg.set_index(self.date_col).sort_index()
         daily_agg_clean = daily_agg.dropna()
@@ -192,7 +403,7 @@ class CityLevelCorrelationAnalyzer:
         rolling_results = {}
         if len(daily_agg_clean) >= 60:
             static_corr = daily_agg_clean.corr()[self.target_col].sort_values(ascending=False)
-            top_vars = static_corr.head(3).index.tolist()[1:3]  # Top 2 excluding target
+            top_vars = static_corr.head(3).index.tolist()[1:3]
 
             rolling_window = 30
             for var in top_vars:
@@ -207,17 +418,19 @@ class CityLevelCorrelationAnalyzer:
                             'std_correlation': rolling_corr.std()
                         }
 
-        results['rolling_correlations'] = rolling_results
+        return rolling_results
 
-        # 2.3 Lagged Correlations (Simplified)
-        print(f"\n⏰ 2.3 Lagged Correlation Analysis")
-        print("-" * 50)
+    def _analyze_lagged_correlations(self) -> Dict[str, Dict[str, float]]:
+        """Analyze lagged correlation patterns"""
+        daily_agg = self.df.groupby(self.date_col)[self.analysis_cols].mean().reset_index()
+        daily_agg = daily_agg.set_index(self.date_col).sort_index()
+        daily_agg_clean = daily_agg.dropna()
 
         lagged_results = {}
         if len(daily_agg_clean) >= 60:
             max_lags = 5
             static_corr = daily_agg_clean.corr()[self.target_col].sort_values(ascending=False)
-            top_vars = static_corr.head(3).index.tolist()[1:3]  # Top 2 excluding target
+            top_vars = static_corr.head(3).index.tolist()[1:3]
 
             for var in top_vars:
                 if var in daily_agg_clean.columns:
@@ -251,175 +464,84 @@ class CityLevelCorrelationAnalyzer:
                         'best_correlation': best_corr
                     }
 
-        results['lagged_correlations'] = lagged_results
+        return lagged_results
 
-        return results
 
-    def multicollinearity_advanced_analysis(self):
-        """3. Advanced multicollinearity analysis"""
-        print("\n" + "="*70)
-        print("🔍 3. ADVANCED MULTICOLLINEARITY ANALYSIS")
-        print("="*70)
+# =============================================================================
+# VISUALIZATION MODULE
+# =============================================================================
 
-        X = self.df[self.predictor_cols].dropna()
-        vif_data = []
+class CorrelationVisualizer:
+    """
+    Visualization module for correlation analysis
+    """
 
-        try:
-            from statsmodels.tools.tools import add_constant
-            X_with_const = add_constant(X)
+    def __init__(self, analyzer: CorrelationAnalyzer):
+        self.analyzer = analyzer
+        self.setup_style()
 
-            for i, col in enumerate(X.columns):
-                vif_score = variance_inflation_factor(X_with_const.values, i+1)
-                vif_data.append({
-                    'Feature': col,
-                    'VIF_Score': vif_score,
-                    'Category': self._categorize_feature(col),
-                    'Risk_Level': self._interpret_vif(vif_score)
-                })
+    def setup_style(self):
+        """Setup plotting style"""
+        plt.style.use('seaborn-v0_8')
+        sns.set_palette("RdYlBu_r")
+        plt.rcParams['figure.figsize'] = (15, 10)
+        plt.rcParams['font.size'] = 10
 
-        except Exception as e:
-            print(f"   ⚠️ VIF calculation error: {e}")
-            # Alternative: correlation-based detection
-            corr_matrix = X.corr()
-            for col in X.columns:
-                max_corr = corr_matrix[col].drop(col).abs().max()
-                vif_score = 1/(1-max_corr**2) if max_corr < 0.99 else 100
-                vif_data.append({
-                    'Feature': col,
-                    'VIF_Score': vif_score,
-                    'Category': self._categorize_feature(col),
-                    'Risk_Level': self._interpret_vif(vif_score)
-                })
+    def visualize_meteorological_correlations(self, correlations: Dict[str, pd.DataFrame],
+                                           feature_groups: Dict[str, List[str]]) -> None:
+        """Visualize meteorological correlation matrices"""
+        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+        fig.suptitle('Meteorological Cross-Correlation Analysis',
+                     fontsize=16, fontweight='bold')
 
-        if vif_data:
-            vif_df = pd.DataFrame(vif_data).sort_values('VIF_Score', ascending=False)
-            print(f"📊 Multicollinearity Analysis Results:")
-            print(vif_df.head(10).to_string(index=False))
+        # Pearson correlation
+        mask = np.triu(np.ones_like(correlations['pearson'], dtype=bool))
+        sns.heatmap(correlations['pearson'], mask=mask, annot=True,
+                   cmap='RdBu_r', center=0, square=True, linewidths=.5,
+                   cbar_kws={"shrink": .8}, fmt='.2f', ax=axes[0,0])
+        axes[0,0].set_title('Pearson Correlation (Linear)', fontweight='bold')
 
-        return vif_df if vif_data else None
+        # Spearman correlation
+        sns.heatmap(correlations['spearman'], mask=mask, annot=True,
+                   cmap='RdBu_r', center=0, square=True, linewidths=.5,
+                   cbar_kws={"shrink": .8}, fmt='.2f', ax=axes[0,1])
+        axes[0,1].set_title('Spearman Correlation (Monotonic)', fontweight='bold')
 
-    def feature_interaction_network(self):
-        """4. Network analysis focusing on feature interactions"""
-        print("\n" + "="*70)
-        print("🕸️ 4. FEATURE INTERACTION NETWORK")
-        print("="*70)
+        # Target correlations
+        target_corr = correlations['pearson'][self.analyzer.target_col].drop(self.analyzer.target_col).sort_values(key=abs, ascending=False)
+        bars = axes[1,0].barh(range(len(target_corr)), target_corr.values,
+                             color=['red' if x > 0 else 'blue' for x in target_corr.values], alpha=0.7)
+        axes[1,0].set_yticks(range(len(target_corr)))
+        axes[1,0].set_yticklabels(target_corr.index, fontsize=9)
+        axes[1,0].set_title(f'Correlations with {self.analyzer.target_col}', fontweight='bold')
+        axes[1,0].grid(True, alpha=0.3)
 
-        corr_matrix = self.df[self.analysis_cols].corr()
-        G = nx.Graph()
+        # Nonlinearity detection
+        diff_matrix = correlations['spearman'] - correlations['pearson']
+        sns.heatmap(diff_matrix, mask=mask, annot=True,
+                   cmap='RdYlGn', center=0, square=True, linewidths=.5,
+                   cbar_kws={"shrink": .8}, fmt='.2f', ax=axes[1,1])
+        axes[1,1].set_title('Nonlinearity Detection', fontweight='bold')
 
-        # Add nodes
-        for feature in self.analysis_cols:
-            category = self._categorize_feature(feature)
-            G.add_node(feature, category=category, is_target=(feature == self.target_col))
+        plt.tight_layout()
+        plt.show()
 
-        # Add edges for significant correlations
-        correlation_threshold = 0.25
-        for i, feature1 in enumerate(self.analysis_cols):
-            for j, feature2 in enumerate(self.analysis_cols):
-                if i < j:
-                    corr_val = corr_matrix.loc[feature1, feature2]
-                    if abs(corr_val) >= correlation_threshold:
-                        G.add_edge(feature1, feature2, weight=abs(corr_val), correlation=corr_val)
-
-        print(f"🕸️ Network: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
-        print(f"   Density: {nx.density(G):.3f}")
-
-        return G, []
-
-    def advanced_correlation_clustering_analysis(self):
-        """
-        6. Advanced Correlation Analysis using Clustering and PCA
-        Utilizes: scipy.cluster, sklearn.preprocessing, sklearn.decomposition
-        """
-        print("\n" + "="*70)
-        print("🔬 6. ADVANCED CORRELATION CLUSTERING & PCA ANALYSIS")
-        print("="*70)
-
-        # Prepare data
-        X = self.df[self.predictor_cols].dropna()
-
-        # 6.1 Standardize features
-        print("📊 6.1 Feature Standardization")
-        print("-" * 50)
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-        X_scaled_df = pd.DataFrame(X_scaled, columns=self.predictor_cols, index=X.index)
-
-        # 6.2 Hierarchical Clustering of Features
-        print("🌳 6.2 Hierarchical Feature Clustering")
-        print("-" * 50)
-
-        # Calculate correlation distance matrix
-        corr_matrix = X_scaled_df.corr()
-        distance_matrix = 1 - np.abs(corr_matrix)
-        condensed_distances = squareform(distance_matrix.values)
-
-        # Perform hierarchical clustering
-        linkage_matrix = linkage(condensed_distances, method='ward')
-
-        # Get clusters
-        n_clusters = min(5, len(self.predictor_cols)//3)  # Adaptive cluster number
-        cluster_labels = fcluster(linkage_matrix, n_clusters, criterion='maxclust')
-
-        # Create feature clusters
-        feature_clusters = {}
-        for i, feature in enumerate(self.predictor_cols):
-            cluster_id = cluster_labels[i]
-            if cluster_id not in feature_clusters:
-                feature_clusters[cluster_id] = []
-            feature_clusters[cluster_id].append(feature)
-
-        print(f"   📊 Features grouped into {n_clusters} clusters:")
-        for cluster_id, features in feature_clusters.items():
-            print(f"   Cluster {cluster_id}: {len(features)} features")
-
-        # 6.3 PCA Analysis
-        print("\n🎯 6.3 Principal Component Analysis")
-        print("-" * 50)
-
-        pca = PCA()
-        pca_result = pca.fit_transform(X_scaled)
-
-        # Calculate correlation of PCs with target
-        target_values = self.df.loc[X.index, self.target_col]
-        pc_target_correlations = []
-
-        for i in range(min(5, len(self.predictor_cols))):  # Top 5 PCs
-            pc_corr = np.corrcoef(pca_result[:, i], target_values)[0, 1]
-            pc_target_correlations.append({
-                'PC': f'PC{i+1}',
-                'Explained_Variance': pca.explained_variance_ratio_[i],
-                'Target_Correlation': pc_corr
-            })
-
-        pc_df = pd.DataFrame(pc_target_correlations)
-        print("   📈 Principal Components vs Target:")
-        print(pc_df.to_string(index=False, float_format='%.3f'))
-
-        # 6.4 Visualization
+    def visualize_clustering_analysis(self, clustering_results: Dict[str, Any]) -> None:
+        """Visualize clustering and PCA results"""
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-        fig.suptitle('Advanced Correlation Analysis: Clustering & PCA', fontsize=16, fontweight='bold')
+        fig.suptitle('Feature Clustering & PCA Analysis', fontsize=16, fontweight='bold')
 
         # Dendrogram
-        dendrogram(linkage_matrix, labels=self.predictor_cols, ax=axes[0,0],
+        dendrogram(clustering_results['linkage_matrix'], 
+                  labels=self.analyzer.predictor_cols, ax=axes[0,0],
                   orientation='top', leaf_rotation=90)
         axes[0,0].set_title('Feature Hierarchical Clustering', fontweight='bold')
         axes[0,0].tick_params(axis='x', labelsize=8)
 
-        # Clustered correlation heatmap
-        cluster_order = []
-        for cluster_id in sorted(feature_clusters.keys()):
-            cluster_order.extend(feature_clusters[cluster_id])
-
-        reordered_corr = corr_matrix.loc[cluster_order, cluster_order]
-        sns.heatmap(reordered_corr, ax=axes[0,1], cmap='RdBu_r', center=0,
-                    square=True, linewidths=0.5, cbar_kws={"shrink": .8})
-        axes[0,1].set_title('Clustered Correlation Matrix', fontweight='bold')
-        axes[0,1].tick_params(axis='both', labelsize=8)
-
         # PCA explained variance
-        cumsum_var = np.cumsum(pca.explained_variance_ratio_)
-        axes[1,0].bar(range(1, len(cumsum_var[:10])+1), pca.explained_variance_ratio_[:10],
+        explained_var = clustering_results['explained_variance_ratio']
+        cumsum_var = np.cumsum(explained_var)
+        axes[1,0].bar(range(1, len(explained_var[:10])+1), explained_var[:10],
                       alpha=0.7, color='skyblue')
         axes[1,0].plot(range(1, len(cumsum_var[:10])+1), cumsum_var[:10],
                       'ro-', linewidth=2, markersize=6)
@@ -429,9 +551,10 @@ class CityLevelCorrelationAnalyzer:
         axes[1,0].grid(True, alpha=0.3)
 
         # PC correlation with target
-        pc_corrs = [abs(corr['Target_Correlation']) for corr in pc_target_correlations]
+        pc_results = clustering_results['pca_results']
+        pc_corrs = [abs(row['Target_Correlation']) for _, row in pc_results.iterrows()]
         axes[1,1].bar(range(1, len(pc_corrs)+1), pc_corrs, alpha=0.7, color='lightcoral')
-        axes[1,1].set_title('Principal Components vs Target Correlation', fontweight='bold')
+        axes[1,1].set_title('PC vs Target Correlation', fontweight='bold')
         axes[1,1].set_xlabel('Principal Component')
         axes[1,1].set_ylabel('|Correlation| with Target')
         axes[1,1].grid(True, alpha=0.3)
@@ -439,130 +562,51 @@ class CityLevelCorrelationAnalyzer:
         plt.tight_layout()
         plt.show()
 
-        return {
-            'feature_clusters': feature_clusters,
-            'pca_results': pc_df,
-            'explained_variance_ratio': pca.explained_variance_ratio_,
-            'linkage_matrix': linkage_matrix
-        }
-
-    def generate_city_level_insights_report(self):
-        """5. Generate comprehensive insights report"""
-        print("\n" + "="*70)
-        print("📋 5. ENHANCED CITY-LEVEL CORRELATION INSIGHTS REPORT")
-        print("="*70)
-
-        # Run all analyses
-        correlations, feature_groups = self.meteorological_correlation_matrix()
-        temporal_results = self.temporal_correlation_dynamics()
-        vif_results = self.multicollinearity_advanced_analysis()
-        network, edges = self.feature_interaction_network()
-
-        # NEW: Add advanced clustering analysis
-        clustering_results = self.advanced_correlation_clustering_analysis()
-
-        # Extract results
-        seasonal_correlations = temporal_results['seasonal_correlations']
-        rolling_correlations = temporal_results['rolling_correlations']
-        lagged_correlations = temporal_results['lagged_correlations']
-
-        # Executive summary
-        print(f"\n🎯 HO CHI MINH CITY WEATHER CORRELATION EXECUTIVE SUMMARY:")
-        print("="*60)
-
-        target_corr = correlations['pearson'][self.target_col].drop(self.target_col).abs().sort_values(ascending=False)
-        strong_predictors = target_corr[target_corr > 0.3]
-        moderate_predictors = target_corr[(target_corr > 0.2) & (target_corr <= 0.3)]
-
-        print(f"🌧️ PRECIPITATION PREDICTION INSIGHTS:")
-        print(f"   - Strong predictors (|r| > 0.3): {len(strong_predictors)}")
-        print(f"   - Moderate predictors (0.2 < |r| ≤ 0.3): {len(moderate_predictors)}")
-
-        if rolling_correlations:
-            print(f"\n📈 DYNAMIC CORRELATION INSIGHTS:")
-            for var, results in rolling_correlations.items():
-                stability = "Stable" if results['std_correlation'] < 0.1 else "Variable"
-                print(f"   - {var}: {stability} correlation")
-
-        if lagged_correlations:
-            print(f"\n⏰ LAGGED CORRELATION INSIGHTS:")
-            for var, results in lagged_correlations.items():
-                print(f"   - {var}: best at {results['best_lag']} days (r={results['best_correlation']:.3f})")
-
-        # NEW: Add clustering insights
-        print(f"\n🔬 ADVANCED CLUSTERING INSIGHTS:")
-        print(f"   - Feature clusters identified: {len(clustering_results['feature_clusters'])}")
-        top_pc = clustering_results['pca_results'].iloc[0]
-        print(f"   - Top PC explains {top_pc['Explained_Variance']:.1%} variance")
-        print(f"   - Top PC correlation with target: {abs(top_pc['Target_Correlation']):.3f}")
-
-        return {
-            'correlations': correlations,
-            'feature_groups': feature_groups,
-            'seasonal_correlations': seasonal_correlations,
-            'rolling_correlations': rolling_correlations,
-            'lagged_correlations': lagged_correlations,
-            'vif_results': vif_results,
-            'network': network,
-            'strong_predictors': strong_predictors,
-            'moderate_predictors': moderate_predictors,
-            'clustering_results': clustering_results  # NEW
-        }
-
-    def _categorize_feature(self, feature_name):
-        """Helper function to categorize meteorological features"""
-        if any(term in feature_name for term in ['Nhiệt độ', 'Điểm sương', 'bầu ướt']):
-            return 'Temperature'
-        elif 'Độ ẩm' in feature_name:
-            return 'Humidity'
-        elif any(term in feature_name for term in ['gió', 'Hướng', 'Tốc độ']):
-            return 'Wind'
-        elif any(term in feature_name for term in ['Áp suất', 'Bức xạ']):
-            return 'Pressure_Radiation'
-        elif feature_name == self.target_col:
-            return 'Precipitation'
-        else:
-            return 'Other'
-
-    def _interpret_vif(self, vif_score):
-        """Helper function to interpret VIF scores"""
-        if vif_score < 5:
-            return "Low"
-        elif vif_score < 10:
-            return "Moderate"
-        else:
-            return "High"
 
 # =============================================================================
-# EXECUTION
+# CONVENIENCE FUNCTIONS
 # =============================================================================
 
-def run_city_level_correlation_analysis(df, target_col='Lượng mưa', date_col='Ngày'):
-    """Run comprehensive correlation analysis for city-level data"""
-    print("🚀 STARTING CLEANED CITY-LEVEL CORRELATION ANALYSIS")
+def analyze_correlations(df: pd.DataFrame, 
+                        target_col: str = None,
+                        date_col: str = None,
+                        include_visualization: bool = True) -> Dict[str, Any]:
+    """
+    Complete correlation analysis for weather data
+    
+    Args:
+        df: Weather data DataFrame
+        target_col: Target variable column name
+        date_col: Date column name
+        include_visualization: Whether to generate plots
+        
+    Returns:
+        Comprehensive correlation analysis results
+    """
+    print("🚀 STARTING COMPREHENSIVE CORRELATION ANALYSIS")
     print("="*80)
 
-    analyzer = CityLevelCorrelationAnalyzer(df, target_col, date_col)
-    results = analyzer.generate_city_level_insights_report()
+    # Initialize analyzer
+    analyzer = CorrelationAnalyzer(df, target_col, date_col)
 
-    print("\n✅ CLEANED ANALYSIS COMPLETED")
+    # Generate comprehensive report
+    results = analyzer.generate_insights_report()
+
+    # Add visualizations if requested
+    if include_visualization:
+        visualizer = CorrelationVisualizer(analyzer)
+        
+        # Visualize meteorological correlations
+        meteorological_results = results['meteorological_results']
+        visualizer.visualize_meteorological_correlations(
+            meteorological_results['correlations'],
+            meteorological_results['feature_groups']
+        )
+        
+        # Visualize clustering results
+        visualizer.visualize_clustering_analysis(results['clustering_results'])
+
+    print("\n✅ CORRELATION ANALYSIS COMPLETED")
+    print("="*80)
+
     return results
-
-# =============================================================================
-# RUN CITY-LEVEL ANALYSIS
-# =============================================================================
-
-# Chạy phân tích correlation cho dữ liệu TP.HCM
-city_correlation_results = run_city_level_correlation_analysis(
-    df_all,
-    target_col='Lượng mưa',
-    date_col='Ngày'
-)
-
-print(f"\n🎉 ENHANCED HO CHI MINH CITY CORRELATION ANALYSIS SUMMARY:")
-print(f"   💪 Strong Predictors: {len(city_correlation_results['strong_predictors'])}")
-print(f"   📊 Moderate Predictors: {len(city_correlation_results['moderate_predictors'])}")
-print(f"   🌤️ Meteorological Categories: {len(city_correlation_results['feature_groups'])}")
-print(f"   📈 Dynamic Correlations: {len(city_correlation_results['rolling_correlations'])}")  # NEW
-print(f"   ⏰ Lagged Correlations: {len(city_correlation_results['lagged_correlations'])}")    # NEW
-print(f"   🕸️ Feature Network Density: {nx.density(city_correlation_results['network']):.3f}")
