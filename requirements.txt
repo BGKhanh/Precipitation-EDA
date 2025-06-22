@@ -9,7 +9,7 @@ statsmodels>=0.14.4
 requests>=2.32.3
 
 # Optional dependencies
-pywt>=1.8.0
+PyWavelets>=1.8.0
 optuna>=4.4.0
 xgboost>=3.0.2
 lightgbm>=4.6.0

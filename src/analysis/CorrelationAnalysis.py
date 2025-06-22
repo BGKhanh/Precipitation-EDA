@@ -562,6 +562,344 @@ class CorrelationVisualizer:
         plt.tight_layout()
         plt.show()
 
+    def visualize_temporal_dynamics(self, temporal_results: Dict[str, Any]) -> None:
+        """
+        Visualize temporal correlation dynamics
+        
+        Args:
+            temporal_results: Results from analyze_temporal_dynamics()
+        """
+        fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+        fig.suptitle('Temporal Correlation Dynamics Analysis', 
+                     fontsize=16, fontweight='bold')
+
+        # 1. Seasonal correlations
+        seasonal_corrs = temporal_results.get('seasonal_correlations', {})
+        if seasonal_corrs:
+            seasons = list(seasonal_corrs.keys())
+            season_data = []
+            feature_names = []
+            
+            # Get top 10 features for clarity
+            if seasons:
+                first_season = seasons[0]
+                top_features = seasonal_corrs[first_season].abs().sort_values(ascending=False).head(10).index
+                feature_names = top_features.tolist()
+                
+                for season in seasons:
+                    if season in seasonal_corrs:
+                        season_values = [seasonal_corrs[season].get(feat, 0) for feat in feature_names]
+                        season_data.append(season_values)
+            
+            if season_data:
+                season_df = pd.DataFrame(season_data, index=seasons, columns=feature_names)
+                sns.heatmap(season_df, annot=True, cmap='RdBu_r', center=0,
+                           fmt='.2f', ax=axes[0,0], cbar_kws={"shrink": .8})
+                axes[0,0].set_title('Seasonal Correlation Patterns', fontweight='bold')
+                axes[0,0].set_xlabel('Features')
+                axes[0,0].set_ylabel('Seasons')
+        else:
+            axes[0,0].text(0.5, 0.5, 'No seasonal data available', 
+                          ha='center', va='center', transform=axes[0,0].transAxes)
+            axes[0,0].set_title('Seasonal Correlation Patterns', fontweight='bold')
+
+        # 2. Rolling correlation stability
+        rolling_corrs = temporal_results.get('rolling_correlations', {})
+        if rolling_corrs:
+            features = list(rolling_corrs.keys())
+            mean_corrs = [rolling_corrs[feat]['mean_correlation'] for feat in features]
+            std_corrs = [rolling_corrs[feat]['std_correlation'] for feat in features]
+            
+            bars = axes[0,1].bar(range(len(features)), mean_corrs, 
+                                yerr=std_corrs, alpha=0.7, capsize=5,
+                                color=['green' if std < 0.1 else 'orange' for std in std_corrs])
+            axes[0,1].set_xticks(range(len(features)))
+            axes[0,1].set_xticklabels(features, rotation=45, ha='right')
+            axes[0,1].set_title('Rolling Correlation Stability', fontweight='bold')
+            axes[0,1].set_ylabel('Mean Correlation ± Std')
+            axes[0,1].grid(True, alpha=0.3)
+            
+            # Add stability legend
+            from matplotlib.patches import Patch
+            legend_elements = [Patch(facecolor='green', label='Stable (std < 0.1)'),
+                             Patch(facecolor='orange', label='Variable (std ≥ 0.1)')]
+            axes[0,1].legend(handles=legend_elements)
+        else:
+            axes[0,1].text(0.5, 0.5, 'No rolling correlation data available', 
+                          ha='center', va='center', transform=axes[0,1].transAxes)
+            axes[0,1].set_title('Rolling Correlation Stability', fontweight='bold')
+
+        # 3. Lagged correlations
+        lagged_corrs = temporal_results.get('lagged_correlations', {})
+        if lagged_corrs:
+            features = list(lagged_corrs.keys())
+            best_lags = [lagged_corrs[feat]['best_lag'] for feat in features]
+            best_corrs = [abs(lagged_corrs[feat]['best_correlation']) for feat in features]
+            
+            scatter = axes[1,0].scatter(best_lags, best_corrs, s=100, alpha=0.7, c=best_corrs, 
+                                      cmap='viridis')
+            
+            for i, feat in enumerate(features):
+                axes[1,0].annotate(feat, (best_lags[i], best_corrs[i]), 
+                                  xytext=(5, 5), textcoords='offset points', fontsize=9)
+            
+            axes[1,0].set_xlabel('Best Lag (days)')
+            axes[1,0].set_ylabel('|Best Correlation|')
+            axes[1,0].set_title('Optimal Lag Correlations', fontweight='bold')
+            axes[1,0].grid(True, alpha=0.3)
+            plt.colorbar(scatter, ax=axes[1,0], label='|Correlation|')
+        else:
+            axes[1,0].text(0.5, 0.5, 'No lagged correlation data available', 
+                          ha='center', va='center', transform=axes[1,0].transAxes)
+            axes[1,0].set_title('Optimal Lag Correlations', fontweight='bold')
+
+        # 4. Temporal summary statistics
+        axes[1,1].axis('off')
+        summary_text = "📊 TEMPORAL DYNAMICS SUMMARY\n" + "="*40 + "\n"
+        
+        if seasonal_corrs:
+            summary_text += f"🌤️ Seasonal Analysis:\n"
+            summary_text += f"   - Analyzed seasons: {len(seasonal_corrs)}\n"
+            
+        if rolling_corrs:
+            stable_count = sum(1 for feat in rolling_corrs 
+                             if rolling_corrs[feat]['std_correlation'] < 0.1)
+            summary_text += f"\n📈 Rolling Correlations:\n"
+            summary_text += f"   - Analyzed features: {len(rolling_corrs)}\n"
+            summary_text += f"   - Stable correlations: {stable_count}\n"
+            
+        if lagged_corrs:
+            summary_text += f"\n⏰ Lagged Correlations:\n"
+            summary_text += f"   - Analyzed features: {len(lagged_corrs)}\n"
+            avg_lag = np.mean([abs(lagged_corrs[feat]['best_lag']) for feat in lagged_corrs])
+            summary_text += f"   - Average optimal lag: {avg_lag:.1f} days\n"
+        
+        axes[1,1].text(0.05, 0.95, summary_text, transform=axes[1,1].transAxes,
+                      fontsize=11, verticalalignment='top', fontfamily='monospace',
+                      bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.8))
+
+        plt.tight_layout()
+        plt.show()
+
+    def visualize_multicollinearity(self, vif_df: pd.DataFrame) -> None:
+        """
+        Visualize multicollinearity analysis results
+        
+        Args:
+            vif_df: DataFrame with VIF scores from analyze_multicollinearity()
+        """
+        if vif_df.empty:
+            print("⚠️ No multicollinearity data to visualize")
+            return
+            
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle('Multicollinearity Analysis', fontsize=16, fontweight='bold')
+
+        # 1. VIF scores bar plot
+        vif_sorted = vif_df.sort_values('VIF_Score', ascending=True)
+        colors = ['red' if score > 10 else 'orange' if score > 5 else 'green' 
+                 for score in vif_sorted['VIF_Score']]
+        
+        bars = axes[0,0].barh(range(len(vif_sorted)), vif_sorted['VIF_Score'], 
+                             color=colors, alpha=0.7)
+        axes[0,0].set_yticks(range(len(vif_sorted)))
+        axes[0,0].set_yticklabels(vif_sorted['Feature'], fontsize=9)
+        axes[0,0].set_xlabel('VIF Score')
+        axes[0,0].set_title('Variance Inflation Factors', fontweight='bold')
+        axes[0,0].axvline(x=5, color='orange', linestyle='--', alpha=0.7, label='Moderate (5)')
+        axes[0,0].axvline(x=10, color='red', linestyle='--', alpha=0.7, label='High (10)')
+        axes[0,0].legend()
+        axes[0,0].grid(True, alpha=0.3)
+
+        # 2. Risk level distribution
+        risk_counts = vif_df['Risk_Level'].value_counts()
+        colors_pie = {'Low': 'green', 'Moderate': 'orange', 'High': 'red'}
+        pie_colors = [colors_pie.get(level, 'gray') for level in risk_counts.index]
+        
+        wedges, texts, autotexts = axes[0,1].pie(risk_counts.values, labels=risk_counts.index,
+                                                autopct='%1.1f%%', colors=pie_colors,
+                                                explode=[0.05]*len(risk_counts))
+        axes[0,1].set_title('Multicollinearity Risk Distribution', fontweight='bold')
+
+        # 3. Category analysis
+        if 'Category' in vif_df.columns:
+            category_vif = vif_df.groupby('Category')['VIF_Score'].agg(['mean', 'max', 'count']).reset_index()
+            category_vif = category_vif.sort_values('mean', ascending=False)
+            
+            x_pos = range(len(category_vif))
+            bars1 = axes[1,0].bar([x-0.2 for x in x_pos], category_vif['mean'], 
+                                 width=0.4, label='Mean VIF', alpha=0.7, color='skyblue')
+            bars2 = axes[1,0].bar([x+0.2 for x in x_pos], category_vif['max'], 
+                                 width=0.4, label='Max VIF', alpha=0.7, color='lightcoral')
+            
+            axes[1,0].set_xticks(x_pos)
+            axes[1,0].set_xticklabels(category_vif['Category'], rotation=45, ha='right')
+            axes[1,0].set_ylabel('VIF Score')
+            axes[1,0].set_title('VIF by Feature Category', fontweight='bold')
+            axes[1,0].legend()
+            axes[1,0].grid(True, alpha=0.3)
+            
+            # Add count annotations
+            for i, (mean_val, max_val, count) in enumerate(zip(category_vif['mean'], 
+                                                              category_vif['max'], 
+                                                              category_vif['count'])):
+                axes[1,0].text(i, max_val + 0.5, f'n={count}', ha='center', fontsize=9)
+        else:
+            axes[1,0].text(0.5, 0.5, 'No category information available', 
+                          ha='center', va='center', transform=axes[1,0].transAxes)
+            axes[1,0].set_title('VIF by Feature Category', fontweight='bold')
+
+        # 4. Summary statistics
+        axes[1,1].axis('off')
+        
+        high_vif = vif_df[vif_df['VIF_Score'] > 10]
+        moderate_vif = vif_df[(vif_df['VIF_Score'] > 5) & (vif_df['VIF_Score'] <= 10)]
+        low_vif = vif_df[vif_df['VIF_Score'] <= 5]
+        
+        summary_text = "📊 MULTICOLLINEARITY SUMMARY\n" + "="*40 + "\n"
+        summary_text += f"🔍 Total Features: {len(vif_df)}\n\n"
+        summary_text += f"🔴 High Risk (VIF > 10): {len(high_vif)}\n"
+        if len(high_vif) > 0:
+            summary_text += f"   Max VIF: {vif_df['VIF_Score'].max():.2f}\n"
+            summary_text += f"   Features: {', '.join(high_vif['Feature'].head(3).tolist())}\n"
+        
+        summary_text += f"\n🟡 Moderate Risk (5 < VIF ≤ 10): {len(moderate_vif)}\n"
+        summary_text += f"\n🟢 Low Risk (VIF ≤ 5): {len(low_vif)}\n\n"
+        
+        summary_text += f"📈 Statistics:\n"
+        summary_text += f"   Mean VIF: {vif_df['VIF_Score'].mean():.2f}\n"
+        summary_text += f"   Median VIF: {vif_df['VIF_Score'].median():.2f}\n"
+        summary_text += f"   Std VIF: {vif_df['VIF_Score'].std():.2f}\n"
+        
+        axes[1,1].text(0.05, 0.95, summary_text, transform=axes[1,1].transAxes,
+                      fontsize=10, verticalalignment='top', fontfamily='monospace',
+                      bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.8))
+
+        plt.tight_layout()
+        plt.show()
+
+    def visualize_feature_network(self, network: nx.Graph, edges: List) -> None:
+        """
+        Visualize feature interaction network
+        
+        Args:
+            network: NetworkX graph from analyze_feature_network()
+            edges: Edge list with correlations
+        """
+        if network.number_of_nodes() == 0:
+            print("⚠️ No network data to visualize")
+            return
+            
+        fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+        fig.suptitle('Feature Interaction Network Analysis', 
+                     fontsize=16, fontweight='bold')
+
+        # 1. Network graph
+        pos = nx.spring_layout(network, k=1, iterations=50)
+        
+        # Node colors by category
+        node_colors = []
+        for node in network.nodes():
+            category = network.nodes[node].get('category', 'Other')
+            is_target = network.nodes[node].get('is_target', False)
+            if is_target:
+                node_colors.append('red')
+            elif category == 'Temperature':
+                node_colors.append('orange')
+            elif category == 'Humidity':
+                node_colors.append('blue')
+            elif category == 'Wind':
+                node_colors.append('green')
+            elif category == 'Pressure_Radiation':
+                node_colors.append('purple')
+            else:
+                node_colors.append('gray')
+        
+        # Edge weights
+        edge_weights = [network[u][v]['weight'] for u, v in network.edges()]
+        
+        nx.draw_networkx_nodes(network, pos, node_color=node_colors, 
+                              node_size=300, alpha=0.8, ax=axes[0,0])
+        nx.draw_networkx_edges(network, pos, width=[w*3 for w in edge_weights], 
+                              alpha=0.6, ax=axes[0,0])
+        nx.draw_networkx_labels(network, pos, font_size=8, ax=axes[0,0])
+        
+        axes[0,0].set_title('Feature Correlation Network', fontweight='bold')
+        axes[0,0].axis('off')
+        
+        # Add legend
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='red', label='Target'),
+            Patch(facecolor='orange', label='Temperature'),
+            Patch(facecolor='blue', label='Humidity'),
+            Patch(facecolor='green', label='Wind'),
+            Patch(facecolor='purple', label='Pressure/Radiation'),
+            Patch(facecolor='gray', label='Other')
+        ]
+        axes[0,0].legend(handles=legend_elements, loc='upper right')
+
+        # 2. Degree distribution
+        degrees = [network.degree(node) for node in network.nodes()]
+        axes[0,1].hist(degrees, bins=max(1, len(set(degrees))), alpha=0.7, color='skyblue', edgecolor='black')
+        axes[0,1].set_xlabel('Node Degree')
+        axes[0,1].set_ylabel('Frequency')
+        axes[0,1].set_title('Node Degree Distribution', fontweight='bold')
+        axes[0,1].grid(True, alpha=0.3)
+
+        # 3. Edge weight distribution
+        if edge_weights:
+            axes[1,0].hist(edge_weights, bins=20, alpha=0.7, color='lightcoral', edgecolor='black')
+            axes[1,0].set_xlabel('Edge Weight (|Correlation|)')
+            axes[1,0].set_ylabel('Frequency')
+            axes[1,0].set_title('Edge Weight Distribution', fontweight='bold')
+            axes[1,0].grid(True, alpha=0.3)
+        else:
+            axes[1,0].text(0.5, 0.5, 'No edges in network', 
+                          ha='center', va='center', transform=axes[1,0].transAxes)
+            axes[1,0].set_title('Edge Weight Distribution', fontweight='bold')
+
+        # 4. Network summary
+        axes[1,1].axis('off')
+        
+        # Calculate network metrics
+        if network.number_of_edges() > 0:
+            avg_clustering = nx.average_clustering(network)
+            density = nx.density(network)
+            
+            # Find most connected nodes
+            degree_centrality = nx.degree_centrality(network)
+            top_nodes = sorted(degree_centrality.items(), key=lambda x: x[1], reverse=True)[:5]
+        else:
+            avg_clustering = 0
+            density = 0
+            top_nodes = []
+        
+        summary_text = "📊 NETWORK SUMMARY\n" + "="*35 + "\n"
+        summary_text += f"🕸️ Network Structure:\n"
+        summary_text += f"   Nodes: {network.number_of_nodes()}\n"
+        summary_text += f"   Edges: {network.number_of_edges()}\n"
+        summary_text += f"   Density: {density:.3f}\n"
+        summary_text += f"   Avg Clustering: {avg_clustering:.3f}\n\n"
+        
+        if top_nodes:
+            summary_text += f"🌟 Most Connected Features:\n"
+            for i, (node, centrality) in enumerate(top_nodes[:3]):
+                summary_text += f"   {i+1}. {node[:20]}...\n"
+                summary_text += f"      (centrality: {centrality:.3f})\n"
+        
+        if edge_weights:
+            summary_text += f"\n🔗 Edge Statistics:\n"
+            summary_text += f"   Mean |correlation|: {np.mean(edge_weights):.3f}\n"
+            summary_text += f"   Max |correlation|: {np.max(edge_weights):.3f}\n"
+        
+        axes[1,1].text(0.05, 0.95, summary_text, transform=axes[1,1].transAxes,
+                      fontsize=10, verticalalignment='top', fontfamily='monospace',
+                      bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.8))
+
+        plt.tight_layout()
+        plt.show()
+
 
 # =============================================================================
 # CONVENIENCE FUNCTIONS
@@ -605,6 +943,15 @@ def analyze_correlations(df: pd.DataFrame,
         
         # Visualize clustering results
         visualizer.visualize_clustering_analysis(results['clustering_results'])
+        
+        # NEW: Visualize temporal dynamics
+        visualizer.visualize_temporal_dynamics(results['temporal_results'])
+        
+        # NEW: Visualize multicollinearity
+        visualizer.visualize_multicollinearity(results['multicollinearity_results'])
+        
+        # NEW: Visualize feature network
+        visualizer.visualize_feature_network(results['network'], [])
 
     print("\n✅ CORRELATION ANALYSIS COMPLETED")
     print("="*80)

@@ -1,5 +1,5 @@
 # =============================================================================
-# COMPONENT 3: STATIONARITY & AUTOCORRELATION DIAGNOSTICS (REFACTORED)
+# COMPONENT 3: STATIONARITY & AUTOCORRELATION DIAGNOSTICS 
 # =============================================================================
 
 from typing import Dict, List, Tuple, Any, Optional
@@ -16,12 +16,18 @@ warnings.filterwarnings('ignore')
 
 class StationarityAutocorrelationAnalyzer:
     """
-    Phần 3: Chẩn đoán Tính dừng và Tự tương quan
-    ✅ REFACTORED: Loại bỏ BaseAnalyzer, thêm residual analysis từ TemporalAnalysis
+    Phần 3: Chẩn đoán Tính dừng và Tự tương quan với User-Curated Periods
+    
+    Key Enhancement:
+    - Uses user-curated representative periods (e.g., [7, 30, 122, 365])
+    - Simple, clean approach without FFT complexity
+    - Theory-driven parameter selection based on known periods
     """
 
     def __init__(self, df: pd.DataFrame, target_col: str = 'Lượng mưa', 
-                 date_col: str = 'Ngày', mstl_results: Optional[Dict] = None):
+                 date_col: str = 'Ngày', 
+                 mstl_results: Optional[Dict] = None,
+                 representative_periods: Optional[List[int]] = None):
         """
         Initialize with configurable parameters
         
@@ -30,14 +36,21 @@ class StationarityAutocorrelationAnalyzer:
             target_col: Target column name for analysis
             date_col: Date column name
             mstl_results: Optional MSTL decomposition results from TemporalAnalysis
+            representative_periods: User-curated list of periods 
         """
         self.df = df.copy()
         self.target_col = target_col
         self.date_col = date_col
         self.mstl_results = mstl_results
         
+        # Use representative periods instead of complex FFT results
+        self.representative_periods = representative_periods or []
+
         # Prepare data
         self._prepare_data()
+        
+        # Extract theory-driven parameters from representative periods
+        self.theory_driven_params = self._extract_theory_driven_parameters()
 
     def _prepare_data(self) -> None:
         """Prepare data for analysis"""
@@ -48,17 +61,409 @@ class StationarityAutocorrelationAnalyzer:
         # Sort by date
         self.df = self.df.sort_values(self.date_col).reset_index(drop=True)
 
-    def analyze(self) -> Dict[str, Any]:
+
+    def _extract_theory_driven_parameters(self) -> Dict[str, Any]:
+        """        
+        Returns:
+            Dict containing theory-driven parameters for ACF/PACF analysis
         """
-        Main workflow: Stationarity → Autocorrelation → Residual → Synthesis
+        if not self.representative_periods:
+            print("   ⚠️ No representative periods provided - using default parameters")
+            return {
+                'has_periods': False,
+                'max_lags_recommended': 100,  # Default
+                'seasonal_periods': [],
+                'representative_periods': [],
+                'parameter_source': 'default'
+            }
+
+        # max_lags should be >= max(representative periods) + buffer
+        max_period = max(self.representative_periods)
+        buffer = max(20, max_period // 4)  # Adaptive buffer
+        max_lags_recommended = max_period + buffer
+
+        seasonal_periods = [p for p in self.representative_periods if p >= 7]  # Weekly or longer
+
+        theory_params = {
+            'has_periods': True,
+            'max_lags_recommended': min(max_lags_recommended, 200),  # Cap at 200
+            'seasonal_periods': seasonal_periods,
+            'representative_periods': self.representative_periods,
+            'parameter_source': 'theory_driven',
+            'max_period': max_period,
+            'buffer_used': buffer
+        }
+
+        print(f"   🎯 Theory-Driven Parameters Extracted:")
+        print(f"      • Representative periods: {self.representative_periods}")
+        print(f"      • Max lags recommended: {theory_params['max_lags_recommended']}")
+        print(f"      • Seasonal periods: {seasonal_periods}")
+        print(f"      • Parameter source: {theory_params['parameter_source']}")
+
+        return theory_params
+
+
+    def _autocorrelation_analysis(self, target_ts: pd.Series) -> Dict[str, Any]:
+        """                
+        Bước 2: Phân tích Tự tương quan với Representative Periods
+        """
+        print(f"\n🔄 BƯỚC 2: PHÂN TÍCH TỰ TƯƠNG QUAN (THEORY-DRIVEN)")
+        print("="*60)
+
+        # Use theory-driven max_lags
+        max_lags = min(
+            self.theory_driven_params['max_lags_recommended'],
+            len(target_ts) // 4  # Safety constraint
+        )
+
+        print(f"   🎯 Theory-driven max_lags: {max_lags}")
+        print(f"      Source: {self.theory_driven_params['parameter_source']}")
+        if self.theory_driven_params['has_periods']:
+            print(f"      Based on max period: {self.theory_driven_params['max_period']} + buffer: {self.theory_driven_params['buffer_used']}")
+
+        # ACF Analysis
+        acf_results = self._perform_acf_analysis(target_ts, max_lags, "Original Series")
+
+        # PACF Analysis  
+        pacf_results = self._perform_pacf_analysis(target_ts, max_lags, "Original Series")
+
+        # Theory-driven SARIMA Suggestions
+        sarima_suggestions = self._generate_theory_driven_sarima_suggestions(acf_results, pacf_results)
+
+        # Visualization with theory context
+        self._theory_driven_autocorrelation_visualization(target_ts, max_lags, "Original Series")
+
+        return {
+            'acf_results': acf_results,
+            'pacf_results': pacf_results,
+            'sarima_suggestions': sarima_suggestions,
+            'theory_driven_params': self.theory_driven_params,
+            'max_lags_used': max_lags,
+            'success': True
+        }
+
+    def _perform_acf_analysis(self, ts: pd.Series, max_lags: int, label: str) -> Dict[str, Any]:
+        """ACF Analysis"""
+        try:
+            acf_values, acf_confint = acf(ts, nlags=max_lags, alpha=0.05, fft=True)
+
+            # Find significant lags
+            significant_lags = []
+            for lag in range(1, len(acf_values)):
+                if abs(acf_values[lag]) > abs(acf_confint[lag, 1] - acf_values[lag]):
+                    significant_lags.append((lag, acf_values[lag]))
+
+            # Find lags near representative periods (optional validation)
+            periods_validated_lags = self._find_lags_near_periods(significant_lags) if self.theory_driven_params['has_periods'] else []
+
+            print(f"   📈 ACF ({label}):")
+            print(f"      • Total significant lags: {len(significant_lags)}")
+            if periods_validated_lags:
+                print(f"      • Lags near representative periods: {len(periods_validated_lags)}")
+
+            return {
+                'acf_values': acf_values,
+                'significant_lags': significant_lags,
+                'periods_validated_lags': periods_validated_lags,
+                'max_lags': max_lags,
+                'success': True
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _perform_pacf_analysis(self, ts: pd.Series, max_lags: int, label: str) -> Dict[str, Any]:
+        """PACF Analysis"""
+        try:
+            pacf_values, pacf_confint = pacf(ts, nlags=max_lags, alpha=0.05)
+
+            # Find significant lags
+            significant_lags = []
+            for lag in range(1, len(pacf_values)):
+                if abs(pacf_values[lag]) > abs(pacf_confint[lag, 1] - pacf_values[lag]):
+                    significant_lags.append((lag, pacf_values[lag]))
+
+            # Find lags near representative periods
+            periods_validated_lags = self._find_lags_near_periods(significant_lags) if self.theory_driven_params['has_periods'] else []
+
+            print(f"   📈 PACF ({label}):")
+            print(f"      • Total significant lags: {len(significant_lags)}")
+            if periods_validated_lags:
+                print(f"      • Lags near representative periods: {len(periods_validated_lags)}")
+
+            return {
+                'pacf_values': pacf_values,
+                'significant_lags': significant_lags,
+                'periods_validated_lags': periods_validated_lags,
+                'max_lags': max_lags,
+                'success': True
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _find_lags_near_periods(self, significant_lags: List[Tuple[int, float]]) -> List[Tuple[int, float]]:
+        """        
+        Args:
+            significant_lags: List of (lag, value) tuples from ACF/PACF
         
         Returns:
-            Dict containing all analysis results
+            List of lags that are near representative periods
+        """
+        if not self.representative_periods:
+            return significant_lags
+
+        # Simple approach: find lags within ±5 days of representative periods
+        validated_lags = []
+        tolerance = 5
+
+        for lag, value in significant_lags:
+            for period in self.representative_periods:
+                if abs(lag - period) <= tolerance:
+                    validated_lags.append((lag, value))
+                    break
+
+        return validated_lags
+
+    def _generate_theory_driven_sarima_suggestions(self, acf_results: Dict, pacf_results: Dict) -> Dict[str, Any]:
+        """        
+        Theory-driven approach:
+        1. Use representative periods as seasonal period candidates
+        2. Standard ACF/PACF analysis for p,q parameters
+        3. Clean, simple logic
+        """
+        if not (acf_results['success'] and pacf_results['success']):
+            return {'success': False}
+
+        # Standard approach for p, q parameters
+        acf_lags = [lag for lag, _ in acf_results['significant_lags'][:5]]
+        pacf_lags = [lag for lag, _ in pacf_results['significant_lags'][:5]]
+
+        # Enhanced SARIMA parameter selection
+        p = min(3, len(pacf_lags)) if pacf_lags else 1
+        q = min(3, len(acf_lags)) if acf_lags else 1
+
+        # Use representative periods directly for seasonal parameters
+        seasonal_periods = self.theory_driven_params['seasonal_periods']
+        
+        if seasonal_periods:
+            P = 1
+            Q = 1
+            s = max(seasonal_periods)  # Primary seasonal period
+            all_seasonal_periods = seasonal_periods
+        else:
+            # Fallback to traditional detection
+            all_acf_lags = [lag for lag, _ in acf_results['significant_lags']]
+            all_pacf_lags = [lag for lag, _ in pacf_results['significant_lags']]
+            
+            seasonal_lags = []
+            for lag in all_acf_lags + all_pacf_lags:
+                for period in [7, 14, 30, 365]:
+                    if abs(lag - period) <= 2:
+                        seasonal_lags.append(period)
+                        break
+            
+            all_seasonal_periods = list(set(seasonal_lags))
+            P = 1 if all_seasonal_periods else 0
+            Q = 1 if all_seasonal_periods else 0
+            s = max(all_seasonal_periods) if all_seasonal_periods else 0
+
+        # Generate model suggestions
+        model_suggestions = []
+        model_suggestions.append(f'SARIMA({p},1,{q})x({P},1,{Q},{s})' if s > 0 else f'ARIMA({p},1,{q})')
+        model_suggestions.append(f'SARIMA({p},0,{q})x({P},0,{Q},{s})' if s > 0 else f'ARIMA({p},0,{q})')
+        
+        # Add multiple seasonal models if multiple periods available
+        if len(seasonal_periods) > 1:
+            s2 = sorted(seasonal_periods, reverse=True)[1]
+            model_suggestions.append(f'SARIMA({p},1,{q})x(1,1,1,{s2})')
+
+        suggestions = {
+            'nonseasonal_ar': p,
+            'nonseasonal_ma': q,
+            'seasonal_ar': P,
+            'seasonal_ma': Q,
+            'seasonal_period': s,
+            'all_seasonal_periods_detected': all_seasonal_periods,
+            'representative_periods_used': self.representative_periods,  
+            'suggested_models': model_suggestions,
+            'methodology': 'theory_driven' if self.theory_driven_params['has_periods'] else 'traditional',
+            'success': True
+        }
+
+        print(f"   🎯 Theory-Driven SARIMA Parameter Selection:")
+        print(f"      • ACF lags (p): {acf_lags}")
+        print(f"      • PACF lags (q): {pacf_lags}")
+        print(f"      • Representative periods: {self.representative_periods}")
+        print(f"   📊 SARIMA Suggestions: {suggestions['suggested_models']}")
+        
+        return suggestions
+
+    def _theory_driven_autocorrelation_visualization(self, ts: pd.Series, max_lags: int, label: str) -> None:
+        """ACF/PACF visualization with representative periods context"""
+        fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+        fig.suptitle(f'Theory-Driven Autocorrelation Analysis - {label}', 
+                     fontsize=14, fontweight='bold')
+
+        # Add periods information to plots
+        periods_info_text = ""
+        if self.theory_driven_params['has_periods']:
+            periods_info_text = f"Representative Periods: {self.representative_periods}"
+
+        # ACF plot with periods context
+        try:
+            plot_acf(ts, lags=max_lags, ax=axes[0, 0], alpha=0.05)
+            axes[0, 0].set_title(f'ACF - {label}\n{periods_info_text}')
+            
+            # Highlight representative periods
+            if self.theory_driven_params['has_periods']:
+                for period in self.representative_periods[:5]:  # Top 5 to avoid clutter
+                    if period <= max_lags:
+                        axes[0, 0].axvline(x=period, color='red', linestyle='--', alpha=0.6, 
+                                         label=f'{period}d' if period == self.representative_periods[0] else "")
+                if self.representative_periods:
+                    axes[0, 0].legend()
+            
+            axes[0, 0].grid(True, alpha=0.3)
+        except Exception:
+            axes[0, 0].text(0.5, 0.5, 'ACF Plot Error', ha='center', va='center', 
+                           transform=axes[0, 0].transAxes)
+
+        # PACF plot with periods context
+        try:
+            plot_pacf(ts, lags=max_lags, ax=axes[0, 1], alpha=0.05)
+            axes[0, 1].set_title(f'PACF - {label}\nMax lags: {max_lags} (theory-driven)')
+            
+            # Highlight representative periods
+            if self.theory_driven_params['has_periods']:
+                for period in self.representative_periods[:5]:
+                    if period <= max_lags:
+                        axes[0, 1].axvline(x=period, color='red', linestyle='--', alpha=0.6)
+            
+            axes[0, 1].grid(True, alpha=0.3)
+        except Exception:
+            axes[0, 1].text(0.5, 0.5, 'PACF Plot Error', ha='center', va='center', 
+                           transform=axes[0, 1].transAxes)
+
+        # First difference ACF
+        first_diff = ts.diff().dropna()
+        if len(first_diff) > max_lags:
+            try:
+                plot_acf(first_diff, lags=max_lags, ax=axes[1, 0], alpha=0.05)
+                axes[1, 0].set_title('ACF - First Difference')
+                axes[1, 0].grid(True, alpha=0.3)
+            except Exception:
+                axes[1, 0].text(0.5, 0.5, 'ACF Diff Error', ha='center', va='center', 
+                               transform=axes[1, 0].transAxes)
+
+        # First difference PACF
+        if len(first_diff) > max_lags:
+            try:
+                plot_pacf(first_diff, lags=max_lags, ax=axes[1, 1], alpha=0.05)
+                axes[1, 1].set_title('PACF - First Difference')
+                axes[1, 1].grid(True, alpha=0.3)
+            except Exception:
+                axes[1, 1].text(0.5, 0.5, 'PACF Diff Error', ha='center', va='center', 
+                               transform=axes[1, 1].transAxes)
+
+        plt.tight_layout()
+        plt.show()
+
+
+    def _comprehensive_synthesis(self, stationarity_results: Dict, 
+                                autocorr_results: Dict, 
+                                residual_results: Optional[Dict]) -> Dict[str, Any]:
+        """        
+        Bước 4: Tổng hợp & Kết luận với Theory-Driven Methodology
+        """
+        print(f"\n📋 BƯỚC 4: TỔNG HỢP & KẾT LUẬN (THEORY-DRIVEN)")
+        print("="*60)
+
+        # Extract key findings
+        is_stationary = stationarity_results['assessment']['tests_agree']
+        stationarity_type = stationarity_results['assessment']['stationarity_type']
+        
+        # Extract autocorrelation findings
+        all_significant_lags = autocorr_results['acf_results']['significant_lags']
+        periods_validated_lags = autocorr_results['acf_results'].get('periods_validated_lags', [])
+        
+        # Theory-driven insights
+        theory_params = autocorr_results.get('theory_driven_params', {})
+        sarima_suggestions = autocorr_results['sarima_suggestions']
+
+        # Generate synthesis report
+        synthesis_report = {
+            'stationarity_conclusion': stationarity_type,
+            'differencing_needed': not is_stationary,
+            'significant_lags': [lag for lag, _ in all_significant_lags[:5]],
+            'all_significant_lags_count': len(all_significant_lags),
+            'theory_driven_approach': {  
+                'periods_available': theory_params.get('has_periods', False),
+                'methodology': sarima_suggestions.get('methodology', 'traditional'),
+                'periods_validated_lags_count': len(periods_validated_lags),
+                'representative_periods': theory_params.get('representative_periods', []),
+                'max_lags_used': autocorr_results.get('max_lags_used', 100),
+                'parameter_source': theory_params.get('parameter_source', 'default')
+            },
+            'seasonal_lags_detected': sarima_suggestions['all_seasonal_periods_detected'],
+            'model_recommendations': []
+        }
+
+        # Model recommendations
+        if is_stationary:
+            synthesis_report['model_recommendations'].append("ARMA models suitable")
+        else:
+            synthesis_report['model_recommendations'].append("ARIMA models recommended (d=1)")
+
+        # Theory-driven seasonal recommendations
+        if synthesis_report['seasonal_lags_detected']:
+            if theory_params.get('has_periods'):
+                synthesis_report['model_recommendations'].append("SARIMA models for theory-driven seasonal patterns")
+                synthesis_report['model_recommendations'].append(f"Representative periods: {theory_params['representative_periods']}")
+            else:
+                synthesis_report['model_recommendations'].append("SARIMA models for detected seasonal patterns")
+            
+            synthesis_report['model_recommendations'].append(f"All seasonal periods: {synthesis_report['seasonal_lags_detected']}")
+
+        # MSTL Quality Assessment
+        if residual_results and residual_results.get('success'):
+            mstl_quality = residual_results.get('quality_assessment')
+            if mstl_quality:
+                synthesis_report['mstl_decomposition_quality'] = mstl_quality
+
+                if mstl_quality['overall_quality'] == 'Good':
+                    synthesis_report['model_recommendations'].append("MSTL decomposition captured most patterns")
+                else:
+                    synthesis_report['model_recommendations'].append("Additional AR/MA terms may be needed")
+
+        # Theory-driven insights
+        if theory_params.get('has_periods'):
+            synthesis_report['model_recommendations'].append(f"Theory-driven analysis: {len(periods_validated_lags)} lags validated against representative periods")
+
+        # Print synthesis
+        print(f"   📊 PHÁT HIỆN CHÍNH:")
+        print(f"      🔹 Tính dừng: {stationarity_type}")
+        print(f"      🔹 Cần sai phân: {'Có' if synthesis_report['differencing_needed'] else 'Không'}")
+        print(f"      🔹 Methodology: {synthesis_report['theory_driven_approach']['methodology']}")
+        print(f"      🔹 Lags quan trọng (top 5): {synthesis_report['significant_lags']}")
+        print(f"      🔹 Theory-validated lags: {synthesis_report['theory_driven_approach']['periods_validated_lags_count']}")
+        print(f"      🔹 Max lags used: {synthesis_report['theory_driven_approach']['max_lags_used']} ({synthesis_report['theory_driven_approach']['parameter_source']})")
+
+        if theory_params.get('has_periods'):
+            print(f"      🎯 Representative periods: {theory_params['representative_periods']}")
+
+        print(f"\n   💡 THEORY-DRIVEN MODEL RECOMMENDATIONS:")
+        for rec in synthesis_report['model_recommendations']:
+            print(f"      • {rec}")
+
+        return synthesis_report
+
+    def analyze(self) -> Dict[str, Any]:
+        """        
+        Main workflow: Stationarity → Autocorrelation → Residual → Synthesis
         """
         print("\n" + "="*80)
-        print("🔍 PHẦN 3: STATIONARITY & AUTOCORRELATION DIAGNOSTICS")
+        print("🔍 PHẦN 3: THEORY-DRIVEN STATIONARITY & AUTOCORRELATION DIAGNOSTICS")
         print("="*80)
-        print("🎯 Mục tiêu: Chẩn đoán tính dừng và cấu trúc tự tương quan")
+        print("🎯 Mục tiêu: Theory-driven chẩn đoán với representative periods")
 
         # Prepare time series data
         ts_data = self.df.set_index(self.date_col).sort_index()
@@ -68,16 +473,16 @@ class StationarityAutocorrelationAnalyzer:
             print("   ⚠️ Insufficient data for comprehensive diagnostics")
             return {'success': False, 'error': 'Insufficient data'}
 
-        # Step 1: Stationarity Diagnostics
+        # Step 1: Stationarity Diagnostics (unchanged)
         stationarity_results = self._stationarity_diagnostics(target_ts)
 
-        # Step 2: Autocorrelation Analysis
+        # Step 2: Autocorrelation Analysis (with theory-driven periods)
         autocorr_results = self._autocorrelation_analysis(target_ts)
 
-        # Step 3: Residual Diagnostics (if MSTL results available)
+        # Step 3: Residual Diagnostics (unchanged)
         residual_results = self._residual_diagnostics() if self.mstl_results else None
 
-        # Step 4: Comprehensive Synthesis
+        # Step 4: Comprehensive Synthesis (with theory-driven approach)
         synthesis = self._comprehensive_synthesis(stationarity_results, autocorr_results, residual_results)
 
         # Combine all results
@@ -86,7 +491,9 @@ class StationarityAutocorrelationAnalyzer:
             'autocorrelation': autocorr_results,
             'residual_diagnostics': residual_results,
             'synthesis': synthesis,
-            'component_name': 'StationarityAutocorrelationAnalyzer_Refactored'
+            'theory_driven_approach': autocorr_results.get('theory_driven_params', {}), 
+            'component_name': 'StationarityAutocorrelationAnalyzer_Theory_Driven',
+            'success': True
         }
 
         return results
@@ -226,164 +633,6 @@ class StationarityAutocorrelationAnalyzer:
         plt.show()
 
     # =============================================================================
-    # AUTOCORRELATION ANALYSIS METHODS
-    # =============================================================================
-
-    def _autocorrelation_analysis(self, target_ts: pd.Series) -> Dict[str, Any]:
-        """Bước 2: Phân tích Tự tương quan"""
-        print(f"\n🔄 BƯỚC 2: PHÂN TÍCH TỰ TƯƠNG QUAN")
-        print("="*60)
-
-        # ACF Analysis on original series
-        acf_results = self._perform_acf_analysis(target_ts, "Original Series")
-
-        # PACF Analysis on original series
-        pacf_results = self._perform_pacf_analysis(target_ts, "Original Series")
-
-        # SARIMA Suggestions
-        sarima_suggestions = self._generate_sarima_suggestions(acf_results, pacf_results)
-
-        # Visualization
-        self._autocorrelation_visualization(target_ts, "Original Series")
-
-        return {
-            'acf_results': acf_results,
-            'pacf_results': pacf_results,
-            'sarima_suggestions': sarima_suggestions,
-            'success': True
-        }
-
-    def _perform_acf_analysis(self, ts: pd.Series, label: str) -> Dict[str, Any]:
-        """ACF Analysis implementation"""
-        try:
-            max_lags = min(100, len(ts) // 4)
-            acf_values, acf_confint = acf(ts, nlags=max_lags, alpha=0.05, fft=True)
-
-            # Find significant lags
-            significant_lags = []
-            for lag in range(1, len(acf_values)):
-                if abs(acf_values[lag]) > abs(acf_confint[lag, 1] - acf_values[lag]):
-                    significant_lags.append((lag, acf_values[lag]))
-
-            print(f"   📈 ACF ({label}) - Significant lags: {len(significant_lags)}")
-
-            return {
-                'acf_values': acf_values,
-                'significant_lags': significant_lags,
-                'max_lags': max_lags,
-                'success': True
-            }
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
-
-    def _perform_pacf_analysis(self, ts: pd.Series, label: str) -> Dict[str, Any]:
-        """PACF Analysis implementation"""
-        try:
-            max_lags = min(100, len(ts) // 4)
-            pacf_values, pacf_confint = pacf(ts, nlags=max_lags, alpha=0.05)
-
-            # Find significant lags
-            significant_lags = []
-            for lag in range(1, len(pacf_values)):
-                if abs(pacf_values[lag]) > abs(pacf_confint[lag, 1] - pacf_values[lag]):
-                    significant_lags.append((lag, pacf_values[lag]))
-
-            print(f"   📈 PACF ({label}) - Significant lags: {len(significant_lags)}")
-
-            return {
-                'pacf_values': pacf_values,
-                'significant_lags': significant_lags,
-                'max_lags': max_lags,
-                'success': True
-            }
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
-
-    def _generate_sarima_suggestions(self, acf_results: Dict, pacf_results: Dict) -> Dict[str, Any]:
-        """Generate SARIMA parameter suggestions"""
-        if not (acf_results['success'] and pacf_results['success']):
-            return {'success': False}
-
-        # Extract significant lags
-        pacf_lags = [lag for lag, _ in pacf_results['significant_lags'][:5]]
-        acf_lags = [lag for lag, _ in acf_results['significant_lags'][:5]]
-
-        # Simple heuristics for SARIMA orders
-        p = min(3, len(pacf_lags)) if pacf_lags else 1
-        q = min(3, len(acf_lags)) if acf_lags else 1
-
-        # Seasonal parameters (check for seasonal lags)
-        seasonal_lags = [lag for lag in pacf_lags + acf_lags if lag in [7, 14, 30, 365]]
-        P = 1 if seasonal_lags else 0
-        Q = 1 if seasonal_lags else 0
-        s = max(seasonal_lags) if seasonal_lags else 0
-
-        suggestions = {
-            'nonseasonal_ar': p,
-            'nonseasonal_ma': q,
-            'seasonal_ar': P,
-            'seasonal_ma': Q,
-            'seasonal_period': s,
-            'suggested_models': [
-                f'SARIMA({p},1,{q})x({P},1,{Q},{s})' if s > 0 else f'ARIMA({p},1,{q})',
-                f'SARIMA({p},0,{q})x({P},0,{Q},{s})' if s > 0 else f'ARIMA({p},0,{q})'
-            ],
-            'success': True
-        }
-
-        print(f"   🎯 SARIMA Suggestions: {suggestions['suggested_models']}")
-        return suggestions
-
-    def _autocorrelation_visualization(self, ts: pd.Series, label: str) -> None:
-        """ACF/PACF visualization"""
-        max_lags = min(40, len(ts) // 4)
-
-        fig, axes = plt.subplots(2, 2, figsize=(16, 8))
-        fig.suptitle(f'Autocorrelation Analysis - {label}', fontsize=14, fontweight='bold')
-
-        # ACF plot
-        try:
-            plot_acf(ts, lags=max_lags, ax=axes[0, 0], alpha=0.05)
-            axes[0, 0].set_title(f'ACF - {label}')
-            axes[0, 0].grid(True, alpha=0.3)
-        except Exception:
-            axes[0, 0].text(0.5, 0.5, 'ACF Plot Error', ha='center', va='center', 
-                           transform=axes[0, 0].transAxes)
-
-        # PACF plot
-        try:
-            plot_pacf(ts, lags=max_lags, ax=axes[0, 1], alpha=0.05)
-            axes[0, 1].set_title(f'PACF - {label}')
-            axes[0, 1].grid(True, alpha=0.3)
-        except Exception:
-            axes[0, 1].text(0.5, 0.5, 'PACF Plot Error', ha='center', va='center', 
-                           transform=axes[0, 1].transAxes)
-
-        # First difference ACF
-        first_diff = ts.diff().dropna()
-        if len(first_diff) > max_lags:
-            try:
-                plot_acf(first_diff, lags=max_lags, ax=axes[1, 0], alpha=0.05)
-                axes[1, 0].set_title('ACF - First Difference')
-                axes[1, 0].grid(True, alpha=0.3)
-            except Exception:
-                axes[1, 0].text(0.5, 0.5, 'ACF Diff Error', ha='center', va='center', 
-                               transform=axes[1, 0].transAxes)
-
-        # First difference PACF
-        if len(first_diff) > max_lags:
-            try:
-                plot_pacf(first_diff, lags=max_lags, ax=axes[1, 1], alpha=0.05)
-                axes[1, 1].set_title('PACF - First Difference')
-                axes[1, 1].grid(True, alpha=0.3)
-            except Exception:
-                axes[1, 1].text(0.5, 0.5, 'PACF Diff Error', ha='center', va='center', 
-                               transform=axes[1, 1].transAxes)
-
-        plt.tight_layout()
-        plt.show()
-
-    # =============================================================================
     # RESIDUAL ANALYSIS METHODS (MIGRATED FROM TEMPORALANALYSIS)
     # =============================================================================
 
@@ -401,22 +650,18 @@ class StationarityAutocorrelationAnalyzer:
         if len(residual) < 50:
             return {'success': False, 'error': 'Insufficient residual data'}
 
-        # Use the enhanced residual analysis from TemporalAnalysis
-        residual_analysis = self.diagnose_residuals(residual)
+        residual_analysis_results = self.diagnose_residuals(residual)
         
-        if residual_analysis['success']:
-            # Add visualization
-            self.plot_residual_diagnostics(residual_analysis)
+        if residual_analysis_results['success']:
+            # Vẽ biểu đồ từ kết quả
+            self.plot_residual_diagnostics(residual_analysis_results)
             
-            # Legacy compatibility - add old format fields
-            residual_analysis.update({
-                'residual_acf': self._perform_acf_analysis(residual, "MSTL Residual"),
-                'residual_pacf': self._perform_pacf_analysis(residual, "MSTL Residual"),
-                'ljung_box': residual_analysis['ljung_box_results'],
-                'quality_assessment': self._assess_mstl_quality(residual_analysis)
-            })
-
-        return residual_analysis
+            # Đánh giá chất lượng dựa trên kết quả có sẵn
+            quality_assessment = self._assess_mstl_quality(residual_analysis_results)
+            residual_analysis_results['quality_assessment'] = quality_assessment
+            
+            
+        return residual_analysis_results
 
     def diagnose_residuals(self,
                           residual_series: pd.Series,
@@ -424,8 +669,6 @@ class StationarityAutocorrelationAnalyzer:
                           acf_lags: int = 40,
                           normality_tests: bool = True) -> Dict[str, Any]:
         """
-        ✅ MIGRATED FROM TEMPORALANALYSIS: Pure residual diagnostic analysis
-        
         Args:
             residual_series: Residual component from MSTL
             ljung_box_lags: Number of lags for Ljung-Box test
@@ -532,8 +775,6 @@ class StationarityAutocorrelationAnalyzer:
                                  hist_bins: int = 50,
                                  layout: str = '2x2') -> None:
         """
-        ✅ MIGRATED FROM TEMPORALANALYSIS: Pure visualization of residual diagnostics
-        
         Args:
             residual_results: Results from diagnose_residuals()
             figsize: Figure size
@@ -628,9 +869,17 @@ class StationarityAutocorrelationAnalyzer:
         ljung_box = residual_analysis.get('ljung_box_results')
         autocorr_clean = residual_analysis.get('autocorr_clean', False)
         
-        # Count significant lags in residuals (simplified estimation)
-        significant_residual_lags = ljung_box.get('significant_lags', 0) if ljung_box else 0
+        significant_residual_lags = 0
+        if ljung_box and isinstance(ljung_box, dict):
+            if 'significant_lags' in ljung_box:
+                significant_residual_lags = ljung_box['significant_lags']
+            elif 'test_results' in ljung_box:
+                # Fallback: count significant p-values < 0.05
+                test_results = ljung_box['test_results']
+                if hasattr(test_results, 'lb_pvalue'):
+                    significant_residual_lags = (test_results['lb_pvalue'] < 0.05).sum()
 
+        # Quality assessment logic
         if autocorr_clean and significant_residual_lags < 5:
             quality = 'Good'
             reasons = ['Residuals appear random', 'Few significant autocorrelations']
@@ -687,65 +936,6 @@ class StationarityAutocorrelationAnalyzer:
         }
         self.plot_residual_diagnostics(residual_analysis, layout='2x2')
 
-    # =============================================================================
-    # SYNTHESIS METHODS
-    # =============================================================================
-
-    def _comprehensive_synthesis(self, stationarity_results: Dict, 
-                                autocorr_results: Dict, 
-                                residual_results: Optional[Dict]) -> Dict[str, Any]:
-        """Bước 4: Tổng hợp & Kết luận"""
-        print(f"\n📋 BƯỚC 4: TỔNG HỢP & KẾT LUẬN")
-        print("="*60)
-
-        # Extract key findings
-        is_stationary = stationarity_results['assessment']['tests_agree']
-        stationarity_type = stationarity_results['assessment']['stationarity_type']
-        significant_lags = autocorr_results['acf_results']['significant_lags'][:5]
-        seasonal_lags = [lag for lag, _ in significant_lags if lag in [7, 14, 30, 365]]
-
-        # Generate synthesis report
-        synthesis_report = {
-            'stationarity_conclusion': stationarity_type,
-            'differencing_needed': not is_stationary,
-            'significant_lags': [lag for lag, _ in significant_lags],
-            'seasonal_lags_detected': seasonal_lags,
-            'model_recommendations': []
-        }
-
-        # Model recommendations
-        if is_stationary:
-            synthesis_report['model_recommendations'].append("ARMA models suitable")
-        else:
-            synthesis_report['model_recommendations'].append("ARIMA models recommended (d=1)")
-
-        if seasonal_lags:
-            synthesis_report['model_recommendations'].append("SARIMA models for seasonal patterns")
-
-        # MSTL Quality Assessment
-        if residual_results and residual_results.get('success'):
-            mstl_quality = residual_results.get('quality_assessment')
-            if mstl_quality:
-                synthesis_report['mstl_decomposition_quality'] = mstl_quality
-
-                if mstl_quality['overall_quality'] == 'Good':
-                    synthesis_report['model_recommendations'].append("MSTL decomposition captured most patterns")
-                else:
-                    synthesis_report['model_recommendations'].append("Additional AR/MA terms may be needed")
-
-        # Print synthesis
-        print(f"   📊 PHÁT HIỆN CHÍNH:")
-        print(f"      🔹 Tính dừng: {stationarity_type}")
-        print(f"      🔹 Cần sai phân: {'Có' if synthesis_report['differencing_needed'] else 'Không'}")
-        print(f"      🔹 Lags quan trọng: {synthesis_report['significant_lags'][:5]}")
-        print(f"      🔹 Lags mùa vụ: {seasonal_lags}")
-
-        print(f"\n   💡 KHUYẾN NGHỊ MÔ HÌNH:")
-        for rec in synthesis_report['model_recommendations']:
-            print(f"      • {rec}")
-
-        return synthesis_report
-
 
 # =============================================================================
 # CONVENIENCE FUNCTION
@@ -754,7 +944,8 @@ class StationarityAutocorrelationAnalyzer:
 def analyze_stationarity_autocorrelation(df: pd.DataFrame,
                                         target_col: str = 'Lượng mưa',
                                         date_col: str = 'Ngày',
-                                        mstl_results: Optional[Dict] = None) -> Dict[str, Any]:
+                                        mstl_results: Optional[Dict] = None,
+                                        representative_periods: Optional[List[int]] = None) -> Dict[str, Any]:
     """
     Convenience function for complete stationarity and autocorrelation analysis
     
@@ -763,9 +954,10 @@ def analyze_stationarity_autocorrelation(df: pd.DataFrame,
         target_col: Target column name
         date_col: Date column name
         mstl_results: Optional MSTL decomposition results
+        representative_periods: User-curated list of periods [7, 30, 122, 365]
         
     Returns:
         Dict containing all analysis results
     """
-    analyzer = StationarityAutocorrelationAnalyzer(df, target_col, date_col, mstl_results)
+    analyzer = StationarityAutocorrelationAnalyzer(df, target_col, date_col, mstl_results, representative_periods)
     return analyzer.analyze()

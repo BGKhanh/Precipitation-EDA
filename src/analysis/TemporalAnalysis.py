@@ -23,7 +23,6 @@ class TemporalStructureAnalyzer:
     3. MSTL Decomposition (returns residual for Stationarity analysis)
     4. Wavelet Analysis
     
-    ❌ REMOVED: Residual Analysis (now in StationarityAutocorrelationAnalyzer)
     """
 
     def __init__(self, df: pd.DataFrame, target_col: str = None, date_col: str = None):
@@ -177,22 +176,25 @@ class TemporalStructureAnalyzer:
     def analyze_fft(self,
                    detrend_window: int = 30,
                    top_n: int = 10,
-                   period_range: Tuple[int, int] = (7, 730)) -> Dict[str, Any]:
+                   period_range: Tuple[int, int] = (7, 730),
+                   return_n_dominant: int = 10) -> Dict[str, Any]:
         """
-        ✅ PURE ANALYSIS: FFT-based frequency analysis (NO VISUALIZATION)
+        ✅ ENHANCED ANALYSIS: FFT-based frequency analysis with parameterized dominant periods
         
         Args:
             detrend_window: Window size for trend removal
-            top_n: Number of top periods to find
+            top_n: Number of top periods to find during analysis
             period_range: Valid period range (min_days, max_days)
+            return_n_dominant: Number of dominant periods to return for visualization
             
         Returns:
-            Dict containing FFT analysis results
+            Dict containing FFT analysis results with configurable dominant periods
         """
-        print(f"🔊 FFT Frequency Analysis")
+        print(f"🔊 Enhanced FFT Frequency Analysis")
         print(f"   - Detrend window: {detrend_window}")
-        print(f"   - Top periods: {top_n}")
+        print(f"   - Top periods to find: {top_n}")
         print(f"   - Period range: {period_range}")
+        print(f"   - Dominant periods to return: {return_n_dominant}")
 
         # Prepare time series
         ts_data = self.df.set_index(self.date_col).sort_index()
@@ -227,15 +229,20 @@ class TemporalStructureAnalyzer:
         ]
 
         # Sort and convert to integers
-        dominant_periods_int = sorted(list(set(np.round(valid_periods).astype(int))))
+        dominant_periods_int = sorted(list(set(np.round(valid_periods).astype(int))), reverse=True)
+        
+        # Return only the requested number of dominant periods
+        dominant_periods_return = dominant_periods_int[:return_n_dominant]
 
-        print(f"   📊 Found {len(dominant_periods_int)} dominant periods:")
-        for period in dominant_periods_int[:5]:  # Show top 5
-            print(f"      - {period} days")
+        print(f"   📊 Found {len(dominant_periods_int)} total dominant periods")
+        print(f"   📊 Returning top {len(dominant_periods_return)} dominant periods:")
+        for i, period in enumerate(dominant_periods_return, 1):
+            print(f"      {i}. {period} days")
 
         return {
             'success': True,
-            'dominant_periods': dominant_periods_int,
+            'dominant_periods': dominant_periods_return,
+            'all_dominant_periods': dominant_periods_int,  # Full list for reference
             'all_periods': periods,
             'magnitudes': positive_fft_magnitude,
             'frequencies': positive_frequencies,
@@ -243,7 +250,8 @@ class TemporalStructureAnalyzer:
             'parameters': {
                 'detrend_window': detrend_window,
                 'top_n': top_n,
-                'period_range': period_range
+                'period_range': period_range,
+                'return_n_dominant': return_n_dominant
             }
         }
 
@@ -252,9 +260,10 @@ class TemporalStructureAnalyzer:
                      figsize: Tuple[int, int] = (15, 8),
                      show_dominant: bool = True,
                      max_period: int = 365,
-                     log_scale: bool = True) -> None:
+                     log_scale: bool = True,
+                     bar_chart_periods: Optional[int] = None) -> None:
         """
-        ✅ PURE VISUALIZATION: Plot frequency spectrum (NO ANALYSIS)
+        ✅ ENHANCED VISUALIZATION: Plot frequency spectrum with flexible dominant periods display
         
         Args:
             fft_results: Results from analyze_fft()
@@ -262,17 +271,28 @@ class TemporalStructureAnalyzer:
             show_dominant: Whether to highlight dominant periods
             max_period: Maximum period to show
             log_scale: Whether to use log scale for power
+            bar_chart_periods: Number of periods to show in bar chart (None = use all from results)
         """
         if not fft_results['success']:
             print("❌ Cannot plot spectrum: FFT analysis failed")
             return
 
         fig, axes = plt.subplots(1, 2, figsize=figsize)
-        fig.suptitle('Frequency Domain Analysis', fontsize=16, fontweight='bold')
+        fig.suptitle('Enhanced Frequency Domain Analysis', fontsize=16, fontweight='bold')
 
         periods = fft_results['all_periods']
         magnitudes = fft_results['magnitudes']
         dominant_periods = fft_results['dominant_periods']
+
+        # Determine how many periods to show in bar chart
+        if bar_chart_periods is None:
+            periods_to_show = dominant_periods
+            n_periods = len(dominant_periods)
+        else:
+            periods_to_show = dominant_periods[:bar_chart_periods]
+            n_periods = min(bar_chart_periods, len(dominant_periods))
+
+        print(f"   📊 Displaying {n_periods} dominant periods in bar chart")
 
         # Filter by max_period
         valid_idx = periods <= max_period
@@ -295,57 +315,90 @@ class TemporalStructureAnalyzer:
 
         # Highlight dominant periods
         if show_dominant:
-            for period in dominant_periods[:5]:  # Top 5
+            for period in periods_to_show:
                 if period <= max_period:
                     period_idx = np.argmin(np.abs(periods_plot - period))
                     axes[0].axvline(x=period, color='red', linestyle='--', alpha=0.7)
                     axes[0].text(period, power[period_idx], f'{period}d',
-                               rotation=90, verticalalignment='bottom')
+                               rotation=90, verticalalignment='bottom',
+                               fontsize=9, ha='center')
 
-        # Dominant periods bar chart
-        top_5_periods = dominant_periods[:5]
-        top_5_power = []
-        for period in top_5_periods:
+        # Enhanced dominant periods bar chart
+        periods_power = []
+        for period in periods_to_show:
             if period <= max_period:
                 period_idx = np.argmin(np.abs(periods_plot - period))
-                top_5_power.append(power[period_idx])
+                periods_power.append(power[period_idx])
             else:
-                top_5_power.append(0)
+                periods_power.append(0)
 
-        axes[1].bar(range(len(top_5_periods)), top_5_power, alpha=0.7)
-        axes[1].set_xlabel('Rank')
+        # Create bar chart with better formatting
+        x_positions = range(len(periods_to_show))
+        bars = axes[1].bar(x_positions, periods_power, alpha=0.7, 
+                          color=plt.cm.viridis(np.linspace(0, 1, len(periods_to_show))))
+        
+        axes[1].set_xlabel('Dominant Period Rank')
         axes[1].set_ylabel(ylabel)
-        axes[1].set_title('Top Dominant Periods')
-        axes[1].set_xticks(range(len(top_5_periods)))
-        axes[1].set_xticklabels([f'{p}d' for p in top_5_periods])
+        axes[1].set_title(f'Top {n_periods} Dominant Periods')
+        axes[1].set_xticks(x_positions)
+        axes[1].set_xticklabels([f'{p}d' for p in periods_to_show], 
+                               rotation=45 if n_periods > 8 else 0,
+                               ha='right' if n_periods > 8 else 'center')
         axes[1].grid(True, alpha=0.3)
+
+        # Add value labels on bars if not too many
+        if n_periods <= 15:
+            for i, (bar, period) in enumerate(zip(bars, periods_to_show)):
+                height = bar.get_height()
+                axes[1].text(bar.get_x() + bar.get_width()/2., height,
+                           f'{period}',
+                           ha='center', va='bottom', fontsize=8, fontweight='bold')
 
         plt.tight_layout()
         plt.show()
-
     # =============================================================================
     # PAIR 3: MSTL DECOMPOSITION - PURE SEPARATION ✅
     # =============================================================================
 
     def decompose_mstl(self,
                       periods: List[int],
-                      transform: str = 'log1p',
+                      # === MSTL-Specific Parameters ===
+                      windows: Optional[List[int]] = None,
+                      lmbda: Optional[float] = None,
+                      iterate: int = 2,
+                      # === STL Parameters (passed through stl_kwargs) ===
                       **stl_kwargs) -> Dict[str, Any]:
         """
-        ✅ PURE ANALYSIS: MSTL decomposition (NO VISUALIZATION)
+        ✅ SIMPLIFIED MSTL DECOMPOSITION: log1p when lmbda=None, Box-Cox otherwise
         ✅ RETURNS RESIDUAL: For Stationarity analysis
+        ✅ AUTO-HANDLES ZEROS: log1p naturally handles zeros
         
         Args:
-            periods: List of seasonal periods for decomposition
-            transform: Transformation to apply ('log1p', 'log', 'none')
-            **stl_kwargs: Additional parameters for MSTL
+            periods (List[int]): The period of each seasonal component
+                               (e.g., [7, 30, 365] for daily data with weekly, monthly, annual patterns)
+            
+            === MSTL-Specific Parameters ===
+            windows (Optional[List[int]]): The lengths of each seasonal smoother with respect to each period.
+                                         Must be odd. If None, default values from original paper are used.
+                                         Large values → less seasonal variability over time.
+            
+            lmbda (Optional[float]): Transformation parameter:
+                                   - None: Apply log1p transform (handles zeros naturally)
+                                   - "auto": Box-Cox auto-select lambda (with zero-handling)
+                                   - float: Box-Cox with specific lambda value
+            
+            iterate (int): Number of iterations to use to refine the seasonal component.
+                          Default = 2
             
         Returns:
             Dict containing MSTL decomposition results including residual
         """
         print(f"📊 MSTL Decomposition")
         print(f"   - Periods: {periods}")
-        print(f"   - Transform: {transform}")
+        print(f"   - Windows: {windows}")
+        print(f"   - Lambda: {lmbda}")
+        print(f"   - Iterations: {iterate}")
+        print(f"   - STL kwargs: {stl_kwargs}")
 
         try:
             from statsmodels.tsa.seasonal import MSTL
@@ -354,45 +407,135 @@ class TemporalStructureAnalyzer:
             ts_data = self.df.set_index(self.date_col).sort_index()
             target_ts = ts_data[self.target_col].dropna()
 
-            # Apply transformation
-            if transform == 'log1p':
+            # Handle transformation based on lmbda value
+            if lmbda is None:
+                # Apply log1p transformation (handles zeros naturally)
+                print(f"   🔄 Applying log1p transformation (lmbda=None)")
                 transformed_ts = np.log1p(target_ts)
-            elif transform == 'log':
-                transformed_ts = np.log(target_ts + 1e-8)
+                transform_method = 'log1p'
+                mstl_lmbda = None  # No additional Box-Cox in MSTL
+                
             else:
+                # Use Box-Cox transformation within MSTL
+                print(f"   🔄 Using MSTL Box-Cox transformation (lmbda={lmbda})")
+                
+                # Check for zeros if using Box-Cox
+                zero_count = (target_ts == 0).sum()
+                if zero_count > 0:
+                    print(f"   📊 Zero values detected: {zero_count}")
+                    print(f"   ⚠️ Box-Cox requires positive data, zeros detected")
+                
                 transformed_ts = target_ts
+                transform_method = 'box_cox'
+                mstl_lmbda = lmbda
 
-            print(f"   🔄 Applied {transform} transformation")
+            # First attempt: Try MSTL with transformed data
+            try:
+                mstl = MSTL(transformed_ts, 
+                           periods=periods,
+                           windows=windows,
+                           lmbda=mstl_lmbda,  # Only use Box-Cox if not log1p
+                           iterate=iterate,
+                           stl_kwargs=stl_kwargs)
+                
+                mstl_result = mstl.fit()
+                
+                print(f"   ✅ MSTL decomposition completed successfully")
+                print(f"   📊 Transform method: {transform_method}")
+                print(f"   📊 Components extracted: trend, seasonal, residual")
+                print(f"   📤 Residual component available for Stationarity analysis")
 
-            # Run MSTL decomposition with clean parameters
-            stl_kwargs_clean = {k: v for k, v in stl_kwargs.items() 
-                               if k not in ['seasonal_deg', 'trend_deg']}  # Remove problematic parameters
-            
-            mstl = MSTL(transformed_ts, periods=periods, **stl_kwargs_clean)
-            mstl_result = mstl.fit()
+                return {
+                    'success': True,
+                    'mstl_obj': mstl_result,
+                    'original_ts': target_ts,
+                    'transformed_ts': transformed_ts,
+                    'transform_method': transform_method,
+                    'adjusted_ts': None,  # No adjustment needed
+                    'epsilon_added': None,
+                    'periods': periods,
+                    'windows': windows,
+                    'lmbda': lmbda,
+                    'mstl_lmbda': mstl_lmbda,
+                    'iterate': iterate,
+                    'stl_kwargs': stl_kwargs,
+                    'trend': mstl_result.trend,
+                    'seasonal': mstl_result.seasonal,
+                    'resid': mstl_result.resid,
+                }
+                
+            except Exception as first_error:
+                # Check if this is a Box-Cox related error and if we can apply fallback
+                if (transform_method == 'box_cox' and lmbda == "auto" and 
+                    ("positive" in str(first_error).lower() or 
+                     "must be positive" in str(first_error).lower())):
+                    
+                    print(f"   🔧 Box-Cox failed with original data: {first_error}")
+                    print(f"   🚀 Applying auto-fallback: Adding epsilon to zeros")
+                    
+                    # Apply fallback mechanism
+                    epsilon = 1e-8  # Very small constant
+                    zero_mask = target_ts == 0
+                    adjusted_ts = target_ts.copy()
+                    adjusted_ts[zero_mask] = epsilon
+                    
+                    zeros_adjusted = zero_mask.sum()
+                    print(f"   📊 Adjusted {zeros_adjusted} zero values with epsilon={epsilon}")
+                    
+                    try:
+                        # Retry MSTL with adjusted data
+                        mstl_adjusted = MSTL(adjusted_ts, 
+                                           periods=periods,
+                                           windows=windows,
+                                           lmbda=lmbda,
+                                           iterate=iterate,
+                                           stl_kwargs=stl_kwargs)
+                        
+                        mstl_result = mstl_adjusted.fit()
+                        
+                        print(f"   ✅ MSTL decomposition completed with adjusted data")
+                        print(f"   📊 Transform method: {transform_method} (with epsilon)")
+                        print(f"   📊 Components extracted: trend, seasonal, residual")
+                        print(f"   ⚠️ Note: {zeros_adjusted} zero values adjusted with epsilon={epsilon}")
+                        print(f"   📤 Residual component available for Stationarity analysis")
 
-            print(f"   ✅ MSTL decomposition completed")
-            print(f"   📤 Residual component available for Stationarity analysis")
-
-            return {
-                'success': True,
-                'mstl_obj': mstl_result,
-                'original_ts': target_ts,
-                'transformed_ts': transformed_ts,
-                'periods': periods,
-                'trend': mstl_result.trend,
-                'seasonal': mstl_result.seasonal,
-                'resid': mstl_result.resid,  # ✅ KEY: Residual for Stationarity
-                'transform': transform,
-                'parameters': stl_kwargs_clean
-            }
+                        return {
+                            'success': True,
+                            'mstl_obj': mstl_result,
+                            'original_ts': target_ts,
+                            'transformed_ts': adjusted_ts,
+                            'transform_method': f'{transform_method}_epsilon',
+                            'adjusted_ts': adjusted_ts,
+                            'epsilon_added': epsilon,
+                            'zeros_adjusted': zeros_adjusted,
+                            'periods': periods,
+                            'windows': windows,
+                            'lmbda': lmbda,
+                            'mstl_lmbda': lmbda,
+                            'iterate': iterate,
+                            'stl_kwargs': stl_kwargs,
+                            'trend': mstl_result.trend,
+                            'seasonal': mstl_result.seasonal,
+                            'resid': mstl_result.resid,
+                            'fallback_used': True
+                        }
+                        
+                    except Exception as second_error:
+                        print(f"   ❌ MSTL failed even after adjustment: {second_error}")
+                        raise second_error
+                else:
+                    # Not a Box-Cox zero error, re-raise original error
+                    raise first_error
 
         except Exception as e:
             print(f"   ⚠️ MSTL decomposition failed: {e}")
             return {
                 'success': False,
                 'error': str(e),
-                'periods': periods
+                'periods': periods,
+                'windows': windows,
+                'lmbda': lmbda,
+                'transform_method': transform_method if 'transform_method' in locals() else 'unknown'
             }
 
     def plot_decomposition(self,
@@ -401,7 +544,7 @@ class TemporalStructureAnalyzer:
                           show_components: List[str] = ['trend', 'seasonal', 'resid'],
                           original_scale: bool = True) -> None:
         """
-        ✅ PURE VISUALIZATION: Plot MSTL decomposition (NO ANALYSIS)
+        ✅ ENHANCED VISUALIZATION: Handles log1p and Box-Cox transformations
         
         Args:
             mstl_results: Results from decompose_mstl()
@@ -413,32 +556,37 @@ class TemporalStructureAnalyzer:
             print("❌ Cannot plot decomposition: MSTL failed")
             return
 
-        transform = mstl_results['transform']
+        transform_method = mstl_results.get('transform_method', 'unknown')
         n_plots = 1 + len(show_components)  # Original + components
 
         fig, axes = plt.subplots(n_plots, 1, figsize=figsize)
         if n_plots == 1:
             axes = [axes]
 
-        fig.suptitle('MSTL Decomposition Results', fontsize=16, fontweight='bold')
+        fig.suptitle(f'MSTL Decomposition Results ({transform_method})', 
+                    fontsize=16, fontweight='bold')
 
         plot_idx = 0
 
         # Original series
-        if original_scale and transform in ['log1p', 'log']:
-            if transform == 'log1p':
-                original_data = np.expm1(mstl_results['transformed_ts'])
-            else:
-                original_data = np.exp(mstl_results['transformed_ts'])
+        original_data = mstl_results['original_ts']
+        if original_scale and transform_method == 'log1p':
+            # For log1p, we can show both scales
+            axes[plot_idx].plot(original_data.index, original_data.values, 'b-', linewidth=1)
+            axes[plot_idx].set_title('Original Data (Original Scale)')
+            axes[plot_idx].set_ylabel('Precipitation (mm)')
+        elif original_scale and 'box_cox' in transform_method:
+            # For Box-Cox, show original scale
             axes[plot_idx].plot(original_data.index, original_data.values, 'b-', linewidth=1)
             axes[plot_idx].set_title('Original Data (Original Scale)')
             axes[plot_idx].set_ylabel('Precipitation (mm)')
         else:
-            axes[plot_idx].plot(mstl_results['transformed_ts'].index,
-                               mstl_results['transformed_ts'].values, 'b-', linewidth=1)
-            axes[plot_idx].set_title(f'Original Data ({transform} scale)')
-            axes[plot_idx].set_ylabel(f'{transform} Precipitation')
-
+            # Show transformed scale
+            transformed_data = mstl_results['transformed_ts']
+            axes[plot_idx].plot(transformed_data.index, transformed_data.values, 'b-', linewidth=1)
+            axes[plot_idx].set_title(f'Original Data ({transform_method} scale)')
+            axes[plot_idx].set_ylabel(f'{transform_method} Precipitation')
+        
         axes[plot_idx].grid(True, alpha=0.3)
         plot_idx += 1
 
@@ -447,7 +595,7 @@ class TemporalStructureAnalyzer:
             trend = mstl_results['trend']
             axes[plot_idx].plot(trend.index, trend.values, 'g-', linewidth=2)
             axes[plot_idx].set_title('Trend Component')
-            axes[plot_idx].set_ylabel(f'{transform} Trend')
+            axes[plot_idx].set_ylabel(f'{transform_method} Trend')
             axes[plot_idx].grid(True, alpha=0.3)
             plot_idx += 1
 
@@ -456,24 +604,25 @@ class TemporalStructureAnalyzer:
             seasonal = mstl_results['seasonal']
             axes[plot_idx].plot(seasonal.index, seasonal.values, 'r-', linewidth=1)
             axes[plot_idx].set_title('Combined Seasonal Component')
-            axes[plot_idx].set_ylabel(f'{transform} Seasonal')
+            axes[plot_idx].set_ylabel(f'{transform_method} Seasonal')
             axes[plot_idx].grid(True, alpha=0.3)
             plot_idx += 1
 
-        # Residual component (for visual reference only)
+        # Residual component
         if 'resid' in show_components:
             resid = mstl_results['resid']
             axes[plot_idx].plot(resid.index, resid.values, 'purple', linewidth=1, alpha=0.7)
             axes[plot_idx].axhline(y=0, color='black', linestyle='--', alpha=0.5)
             axes[plot_idx].set_title('Residual Component (→ Stationarity Analysis)')
-            axes[plot_idx].set_ylabel(f'{transform} Residual')
+            axes[plot_idx].set_ylabel(f'{transform_method} Residual')
             axes[plot_idx].grid(True, alpha=0.3)
-
-        axes[-1].set_xlabel('Date')
+            axes[-1].set_xlabel('Date')
+        
         plt.tight_layout()
         plt.show()
 
         print(f"   📤 Residual component ready for Stationarity analysis")
+        print(f"   🔄 Transform method used: {transform_method}")
 
     # =============================================================================
     # PAIR 4: WAVELET ANALYSIS - PURE SEPARATION ✅
@@ -610,7 +759,7 @@ class TemporalStructureAnalyzer:
             target_ts = target_ts.tail(365)
             data = target_ts.values
             dates = target_ts.index
-            
+
             # Simplified scales
             scales = np.logspace(1, 2, 20)  # 20 scales from 10 to 100
 
