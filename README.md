@@ -32,7 +32,7 @@ This project implements multiple machine learning approaches to forecast daily r
 - And more...
 
 ## 🏗️ Project Structure:
-"""
+'''
 DS108_project/
 ├── src/ # Source code modules
 │ ├── config/ # Configuration and constants
@@ -63,7 +63,7 @@ DS108_project/
 ├── DS.ipynb # Main analysis notebook
 ├── requirements.txt # Python dependencies
 └── README.md # This file
-"""
+'''
 
 ## 🚀 Getting Started
 
@@ -113,17 +113,17 @@ predictions = model.predict(X_test)
 - **Lasso Regression**: L1 regularized with feature selection
 - **Linear Regression**: Standard ordinary least squares
 
-### Neural Networks
+### Neural Networks (pending)
 - **RNN**: Basic recurrent neural network
 - **LSTM**: Long Short-Term Memory networks
 - **GRU**: Gated Recurrent Units
-- **BiLSTM**: Bidirectional LSTM
+- **BiLSTM**: Bidirectional LSTM 
 
 ### Time Series Models
 - **ARIMA**: AutoRegressive Integrated Moving Average
 - **SARIMA**: Seasonal ARIMA with seasonal components
-
-## 🔧 Key Features
+- **ARIMAX**: AutoRegressive Integrated Moving Average (pending)
+- **SARIMAX**: Seasonal ARIMAX with seasonal components (pending)
 
 ### Two-Stage Modeling
 Each model (except time series) supports configurable two-stage approach:
@@ -202,55 +202,3 @@ model.fit(rainfall_series)
 # Generate forecasts
 forecasts = model.forecast(steps=30)
 ```
-
-## 📊 Results Summary
-
-The project achieves competitive performance across different model families:
-
-- **Best Overall MAE**: ~X.XXX mm (Model: TBD)
-- **Best Classification AUC**: ~0.XXX (Model: TBD)
-- **Best R² Score**: ~0.XXX (Model: TBD)
-
-*Note: Specific results depend on the final model training and evaluation.*
-
-## 🔬 Research Applications
-
-This project supports various research applications:
-- **Climate Analysis**: Understanding rainfall patterns in tropical regions
-- **Agricultural Planning**: Crop irrigation and planting decisions
-- **Urban Planning**: Flood risk assessment and drainage system design
-- **Water Resource Management**: Reservoir and water supply planning
-
-## 📝 Documentation
-
-- **Code Documentation**: Comprehensive docstrings following Google style
-- **Analysis Report**: Detailed EDA findings in Vietnamese (Báo cáo Phân tích Khám phá Dữ liệu.docx)
-- **Methodology**: Step-by-step approach documented in notebooks
-
-## 🤝 Contributing
-
-This is an academic project for DS108 course. For questions or suggestions:
-1. Review the existing code and documentation
-2. Check the main notebook (DS.ipynb) for examples
-3. Refer to individual module documentation
-
-## 📄 License
-
-This project is developed for educational purposes as part of DS108 coursework.
-
-## 🙏 Acknowledgments
-
-- **NASA POWER**: For providing comprehensive meteorological data
-- **Ho Chi Minh City**: Target location for rainfall prediction
-- **DS108 Course**: Academic framework and guidance
-- **Open Source Libraries**: scikit-learn, statsmodels, pandas, numpy, matplotlib
-
-## 📞 Contact
-
-For academic inquiries related to this DS108 project, please refer to the course materials and documentation provided.
-
----
-
-**Project Status**: ✅ Complete - All major components implemented and tested
-
-**Last Updated**: January 2025
