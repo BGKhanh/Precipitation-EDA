@@ -495,6 +495,112 @@ def validate_feature_quality(df: pd.DataFrame,
     return validation_results
 
 
+def create_mstl_features(df: pd.DataFrame,
+                        mstl_results: Dict[str, Any],
+                        date_col: str = None,
+                        lag_periods: Optional[List[int]] = None,
+                        rolling_windows: Optional[List[int]] = None,
+                        rolling_stats: Optional[List[str]] = None) -> pd.DataFrame:
+    """
+    Add MSTL decomposition features and optionally create lag/rolling features
+    
+    Args:
+        df: Original DataFrame
+        mstl_results: Results from MSTL decomposition
+        date_col: Date column name for merging
+        lag_periods: List of lag periods to create (e.g., [1, 2, 3, 7])
+        rolling_windows: List of rolling windows (e.g., [7, 14, 30])
+        rolling_stats: List of rolling statistics (e.g., ['mean', 'std', 'sum'])
+        
+    Returns:
+        DataFrame with MSTL features (and optional lag/rolling features)
+        
+    Example:
+        # Basic MSTL features only
+        df_mstl = create_mstl_features(df, mstl_results)
+        
+        # MSTL + lag features
+        df_mstl = create_mstl_features(df, mstl_results, lag_periods=[1, 2, 3, 7])
+        
+        # MSTL + rolling features  
+        df_mstl = create_mstl_features(df, mstl_results, 
+                                      rolling_windows=[7, 14], 
+                                      rolling_stats=['mean', 'sum'])
+        
+        # MSTL + both lag and rolling
+        df_mstl = create_mstl_features(df, mstl_results, 
+                                      lag_periods=[1, 3, 7],
+                                      rolling_windows=[7, 30],
+                                      rolling_stats=['mean', 'std'])
+    """
+    print(f"📊 ADDING MSTL FEATURES")
+    
+    # Check if MSTL was successful
+    if not mstl_results.get('success', False):
+        print(f"   ❌ MSTL decomposition failed, cannot add features")
+        return df.copy()
+    
+    date_col = date_col or Config.COLUMN_MAPPING.get('DATE', 'Ngày')
+    df_result = df.copy()
+    
+    # Get MSTL components
+    trend = mstl_results['trend']
+    seasonal = mstl_results['seasonal']
+    residual = mstl_results['resid']
+    
+    print(f"   Components shape: {len(trend)} observations")
+    print(f"   Seasonal shape: {seasonal.shape}")
+    
+    # Create MSTL features dictionary
+    mstl_features = {
+        'MSTL_Trend': trend,
+        'MSTL_Residual': residual
+    }
+    
+    # Add seasonal components dynamically
+    n_seasonal = seasonal.shape[1] if len(seasonal.shape) > 1 else 1
+    
+    if n_seasonal == 1:
+        mstl_features['MSTL_Seasonal'] = seasonal
+    else:
+        for i in range(n_seasonal):
+            feature_name = f'MSTL_Seasonal_{i+1}'
+            mstl_features[feature_name] = seasonal.iloc[:, i]
+    
+    # Create DataFrame with MSTL components
+    mstl_df = pd.DataFrame(mstl_features, index=trend.index)
+    
+    # Merge with original DataFrame
+    if date_col in df_result.columns:
+        df_result = df_result.set_index(date_col)
+        df_result = df_result.join(mstl_df, how='left')
+        df_result = df_result.reset_index()
+    else:
+        df_result = df_result.join(mstl_df, how='left')
+    
+    # Report MSTL features added
+    mstl_feature_names = list(mstl_features.keys())
+    print(f"   ✅ Added {len(mstl_feature_names)} MSTL features:")
+    for feat in mstl_feature_names:
+        if feat in df_result.columns:
+            missing_count = df_result[feat].isnull().sum()
+            print(f"      • {feat}: {missing_count} missing values")
+    
+    # Create lag features if requested
+    if lag_periods is not None:
+        print(f"\n   🕒 Creating lag features for MSTL components...")
+        df_result = create_lag_features(df_result, mstl_feature_names, lag_periods)
+    
+    # Create rolling features if requested
+    if rolling_windows is not None:
+        rolling_stats = rolling_stats or ['mean']  # Default to mean if not specified
+        print(f"\n   🪟 Creating rolling features for MSTL components...")
+        df_result = create_rolling_features(df_result, mstl_feature_names, rolling_windows, rolling_stats)
+    
+    print(f"\n   📊 Final shape: {df_result.shape}")
+    return df_result
+
+
 # =============================================================================
 # CONVENIENCE FUNCTION FOR COMPLETE WORKFLOW
 # =============================================================================
@@ -532,7 +638,8 @@ def apply_feature_engineering_steps(df: pd.DataFrame,
         'create_lag_features': create_lag_features,
         'create_rolling_features': create_rolling_features,
         'create_interaction_features': create_interaction_features,
-        'handle_missing_values': handle_missing_values
+        'handle_missing_values': handle_missing_values,
+        'create_mstl_features': create_mstl_features
     }
     
     for i, step in enumerate(steps):

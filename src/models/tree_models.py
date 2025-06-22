@@ -258,8 +258,7 @@ class LightGBMWrapper:
         self.model = lgb.train(
             self.params,
             train_data,
-            num_boost_round=self.num_boost_round,
-            verbose_eval=False
+            num_boost_round=self.num_boost_round
         )
         
     def predict(self, X: pd.DataFrame) -> np.ndarray:
