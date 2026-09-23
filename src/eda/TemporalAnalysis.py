@@ -917,8 +917,22 @@ class TemporalStructureAnalyzer:
 
     def analyze_all(self) -> Dict[str, Any]:
         """
-        Convenience method: Run all analyses with default parameters
-        ✅ UPDATED: No residual analysis (now handled by Stationarity)
+        Convenience method: Run all analyses with default parameters.
+        
+        .. note:: Period selection for MSTL
+        
+           When called standalone, this method uses **FFT-detected** dominant
+           periods (top 3 by magnitude) for MSTL decomposition (line below:
+           ``fft_results.get('dominant_periods', ...)``).  This is data-driven
+           but may capture noise — rainfall FFT spectra are much noisier than
+           e.g. temperature.
+           
+           When called via ``EDAPipeline`` with ``period_selection='domain'``,
+           the pipeline overrides these periods with climatologically-motivated
+           values (e.g. ``[7, 30, 122, 365]``).  See ``EDAPipeline`` docstring.
+           
+           The fallback ``[7, 30, 365]`` represents: weekly cycle, MJO (~30d),
+           annual monsoon.
         
         Returns:
             Dict containing all analysis results + residual for Stationarity
@@ -934,7 +948,9 @@ class TemporalStructureAnalyzer:
         fft_results = self.analyze_fft()
 
         # Step 3: MSTL decomposition (returns residual for Stationarity)
-        periods = fft_results.get('dominant_periods', [7, 30, 365])[:3]  # Use top 3
+        # NOTE: periods here come from FFT, not domain knowledge.
+        # See EDAPipeline.period_selection for the domain-knowledge alternative.
+        periods = fft_results.get('dominant_periods', [7, 30, 365])[:3]
         mstl_results = self.decompose_mstl(periods)
 
         # Step 4: Wavelet analysis

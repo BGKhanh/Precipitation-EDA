@@ -7,21 +7,38 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import warnings
-from statsmodels.tsa.stattools import adfuller, kpss, acf, pacf
+from statsmodels.tsa.stattools import acf, pacf
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from scipy.stats import probplot
+
+# Single source of truth for stationarity testing (Step 2 refactor)
+from src.featurengineering.stationarity_test import StationarityTester
 
 warnings.filterwarnings('ignore')
 
 
 class StationarityAutocorrelationAnalyzer:
-    """
-    Phần 3: Chẩn đoán Tính dừng và Tự tương quan với User-Curated Periods
+    """Stationarity & Autocorrelation diagnostics using representative periods.
     
-    Key Enhancement:
-    - Uses user-curated representative periods (e.g., [7, 30, 122, 365])
-    - Simple, clean approach without FFT complexity
-    - Theory-driven parameter selection based on known periods
+    Accepts ``representative_periods`` (e.g. ``[7, 30, 122, 365]``) to guide
+    ACF/PACF lag range and SARIMA seasonal-order suggestion.
+
+    .. note:: Source of ``representative_periods``
+
+       These periods may come from **domain knowledge** (hardcoded by the
+       analyst, e.g. ``EDAPipeline(period_selection='domain')``) **or** from
+       **FFT detection** (``TemporalStructureAnalyzer.analyze_all()``).  When
+       using FFT-detected periods, the label 'theory-driven' in print output
+       is a misnomer — the periods are data-driven.  See ``EDAPipeline``
+       docstring for details.
+
+    .. note:: ADF/KPSS regression specification
+
+       As of the Step 2 refactor, both ADF and KPSS tests delegate to
+       ``StationarityTester`` with ``regression='c'`` (constant only, no
+       trend).  This is appropriate for rainfall data which has strong
+       seasonality but no physical basis for a deterministic linear trend.
+       Previous code used ``regression='ct'`` which reduced test power.
     """
 
     def __init__(self, df: pd.DataFrame, target_col: str = 'Lượng mưa', 
@@ -241,13 +258,22 @@ class StationarityAutocorrelationAnalyzer:
         p = min(3, len(pacf_lags)) if pacf_lags else 1
         q = min(3, len(acf_lags)) if acf_lags else 1
 
-        # Use representative periods directly for seasonal parameters
+        # Use representative periods for seasonal parameters, but cap s
+        # at MAX_FEASIBLE_SEASONAL to avoid infeasible SARIMAX fits.
+        # Periods > 52 should use Fourier harmonics as exogenous instead.
+        MAX_FEASIBLE_SEASONAL = 52
         seasonal_periods = self.theory_driven_params['seasonal_periods']
         
         if seasonal_periods:
-            P = 1
-            Q = 1
-            s = max(seasonal_periods)  # Primary seasonal period
+            feasible_periods = [p_ for p_ in seasonal_periods if p_ <= MAX_FEASIBLE_SEASONAL]
+            long_periods = [p_ for p_ in seasonal_periods if p_ > MAX_FEASIBLE_SEASONAL]
+            
+            if feasible_periods:
+                P = 1
+                Q = 1
+                s = max(feasible_periods)  # Typically 7 (weekly)
+            else:
+                P, Q, s = 0, 0, 0
             all_seasonal_periods = seasonal_periods
         else:
             # Fallback to traditional detection
@@ -262,19 +288,31 @@ class StationarityAutocorrelationAnalyzer:
                         break
             
             all_seasonal_periods = list(set(seasonal_lags))
-            P = 1 if all_seasonal_periods else 0
-            Q = 1 if all_seasonal_periods else 0
-            s = max(all_seasonal_periods) if all_seasonal_periods else 0
+            feasible_periods = [p_ for p_ in all_seasonal_periods if p_ <= MAX_FEASIBLE_SEASONAL]
+            long_periods = [p_ for p_ in all_seasonal_periods if p_ > MAX_FEASIBLE_SEASONAL]
+            P = 1 if feasible_periods else 0
+            Q = 1 if feasible_periods else 0
+            s = max(feasible_periods) if feasible_periods else 0
 
         # Generate model suggestions
         model_suggestions = []
         model_suggestions.append(f'SARIMA({p},1,{q})x({P},1,{Q},{s})' if s > 0 else f'ARIMA({p},1,{q})')
         model_suggestions.append(f'SARIMA({p},0,{q})x({P},0,{Q},{s})' if s > 0 else f'ARIMA({p},0,{q})')
         
-        # Add multiple seasonal models if multiple periods available
-        if len(seasonal_periods) > 1:
-            s2 = sorted(seasonal_periods, reverse=True)[1]
+        # Add multiple seasonal models if multiple feasible periods available
+        if len(feasible_periods) > 1:
+            s2 = sorted(feasible_periods, reverse=True)[1]
             model_suggestions.append(f'SARIMA({p},1,{q})x(1,1,1,{s2})')
+
+        # Build notes for long periods
+        long_period_notes = []
+        if long_periods:
+            long_period_notes.append(
+                f"Periods {long_periods} detected but too long for literal "
+                f"SARIMAX (max feasible s={MAX_FEASIBLE_SEASONAL}). "
+                f"Use Fourier terms (sin/cos harmonics) as exogenous regressors "
+                f"instead — FeatureBuilder already creates DayOfYear_sin/cos."
+            )
 
         suggestions = {
             'nonseasonal_ar': p,
@@ -283,16 +321,25 @@ class StationarityAutocorrelationAnalyzer:
             'seasonal_ma': Q,
             'seasonal_period': s,
             'all_seasonal_periods_detected': all_seasonal_periods,
+            'feasible_periods': feasible_periods,
+            'long_periods_fourier_recommended': long_periods,
+            'long_period_notes': long_period_notes,
             'representative_periods_used': self.representative_periods,  
             'suggested_models': model_suggestions,
             'methodology': 'theory_driven' if self.theory_driven_params['has_periods'] else 'traditional',
-            'success': True
+            'success': True,
+            # Structured order tuples for EDAReport consumption
+            'orders': [{'order': (p, 1, q)}, {'order': (p, 0, q)}],
+            'seasonal_orders': [{'order': (P, 1, Q, s)}] if s > 0 else [],
         }
 
-        print(f"   🎯 Theory-Driven SARIMA Parameter Selection:")
+        print(f"   🎯 SARIMA Parameter Selection:")
         print(f"      • ACF lags (p): {acf_lags}")
         print(f"      • PACF lags (q): {pacf_lags}")
         print(f"      • Representative periods: {self.representative_periods}")
+        print(f"      • Feasible seasonal s: {s} (cap={MAX_FEASIBLE_SEASONAL})")
+        if long_periods:
+            print(f"      ⚠️ Long periods {long_periods} → use Fourier terms, not literal SARIMAX")
         print(f"   📊 SARIMA Suggestions: {suggestions['suggested_models']}")
         
         return suggestions
@@ -527,40 +574,45 @@ class StationarityAutocorrelationAnalyzer:
         }
 
     def _perform_adf_test(self, ts: pd.Series) -> Dict[str, Any]:
-        """ADF Test implementation"""
+        """ADF Test — delegates to StationarityTester (single source of truth).
+        
+        Uses regression='c' (constant only) by default. See
+        stationarity_test.py docstring for rationale.
+        """
         try:
-            result = adfuller(ts, regression='ct', autolag='AIC')
+            result = StationarityTester.test_stationarity(ts, regression='c')
 
             print(f"   📊 ADF Test:")
-            print(f"      - Statistic: {result[0]:.6f}")
-            print(f"      - P-value: {result[1]:.6f}")
-            print(f"      - Result: {'✅ Stationary' if result[1] < 0.05 else '❌ Non-stationary'}")
+            print(f"      - Statistic: {result['ADF_statistic']:.6f}")
+            print(f"      - P-value: {result['ADF_pvalue']:.6f}")
+            print(f"      - Result: {'✅ Stationary' if result['ADF_stationary'] else '❌ Non-stationary'}")
 
             return {
-                'statistic': result[0],
-                'pvalue': result[1],
-                'critical_values': result[4],
-                'is_stationary': result[1] < 0.05,
+                'statistic': result['ADF_statistic'],
+                'pvalue': result['ADF_pvalue'],
+                'is_stationary': result['ADF_stationary'],
                 'success': True
             }
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
     def _perform_kpss_test(self, ts: pd.Series) -> Dict[str, Any]:
-        """KPSS Test implementation"""
+        """KPSS Test — delegates to StationarityTester (single source of truth).
+        
+        Uses regression='c' (constant only) by default, matching ADF.
+        """
         try:
-            result = kpss(ts, regression='ct')
+            result = StationarityTester.test_stationarity(ts, regression='c')
 
             print(f"   📊 KPSS Test:")
-            print(f"      - Statistic: {result[0]:.6f}")
-            print(f"      - P-value: {result[1]:.6f}")
-            print(f"      - Result: {'✅ Stationary' if result[1] > 0.05 else '❌ Non-stationary'}")
+            print(f"      - Statistic: {result['KPSS_statistic']:.6f}")
+            print(f"      - P-value: {result['KPSS_pvalue']:.6f}")
+            print(f"      - Result: {'✅ Stationary' if result['KPSS_stationary'] else '❌ Non-stationary'}")
 
             return {
-                'statistic': result[0],
-                'pvalue': result[1],
-                'critical_values': result[3],
-                'is_stationary': result[1] > 0.05,
+                'statistic': result['KPSS_statistic'],
+                'pvalue': result['KPSS_pvalue'],
+                'is_stationary': result['KPSS_stationary'],
                 'success': True
             }
         except Exception as e:

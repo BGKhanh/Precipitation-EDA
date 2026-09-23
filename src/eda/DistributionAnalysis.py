@@ -210,12 +210,18 @@ class DistributionAnalyzer:
         print(f"     → Interpretation: {skew_interpretation}")
 
         print(f"   - Kurtosis: {kurt:.4f}")
-        if kurt > 3:
-            kurt_interpretation = "Leptokurtic (nhọn hơn normal)"
-        elif kurt < -3:
-            kurt_interpretation = "Platykurtic (tù hơn normal)"
-        else:
+        # NOTE: pandas.Series.kurtosis() returns EXCESS kurtosis (normal = 0).
+        # Thresholds per George & Mallery (2010): ±0.5 ~ near-normal, ±2 ~ pronounced.
+        if kurt > 2:
+            kurt_interpretation = "Leptokurtic (đuôi nặng, nhọn hơn normal rõ rệt)"
+        elif kurt > 0.5:
+            kurt_interpretation = "Slightly leptokurtic (hơi nhọn hơn normal)"
+        elif kurt > -0.5:
             kurt_interpretation = "Mesokurtic (gần normal)"
+        elif kurt > -2:
+            kurt_interpretation = "Slightly platykurtic (hơi tù hơn normal)"
+        else:
+            kurt_interpretation = "Platykurtic (tù hơn normal rõ rệt)"
         print(f"     → Interpretation: {kurt_interpretation}")
 
         # Vietnamese Meteorological Standards Classification using Config
@@ -469,7 +475,7 @@ class DistributionAnalyzer:
             if category_key == "no_rain":
                 count = (data == 0).sum()
             elif category_key == "trace_rain":
-                count = ((data > 0) & (data <= 0.6)).sum()
+                count = ((data > min_val) & (data <= max_val)).sum()
             elif max_val == float('inf'):
                 count = (data > min_val).sum()
             else:
@@ -478,6 +484,123 @@ class DistributionAnalyzer:
             classification[category_key] = count
         
         return classification
+
+    def analyze_intermittency(
+        self,
+        date_col: str = None,
+        threshold: float = None,
+    ) -> Dict[str, Any]:
+        """Syntetos-Boylan classification for intermittent rainfall.
+
+        Computes ADI (Average Demand Interval) and CV² (squared coefficient
+        of variation of non-zero rainfall) to classify the target series as
+        Smooth / Erratic / Intermittent / Lumpy — directly informing whether
+        Croston/TSB/IMAPA models are appropriate vs standard ARIMA/ML.
+
+        **Data leakage note**: This method runs on the full dataset, not
+        train-only. This is intentional: the result is used for model-family
+        selection (a structural decision), not as a fitted feature or
+        threshold fed into model training. This exception is documented
+        per ``data-leakage-prevention.md`` rule #4 (descriptive EDA on full
+        series is acceptable when output is not fed into a model as a feature).
+
+        Args:
+            date_col: Name of the datetime column.  Required for date-based
+                interval calculation.  Uses ``Config.COLUMN_MAPPING['DATE']``
+                if ``None``.
+            threshold: Rain / no-rain threshold (mm).  Should match
+                ``EDAReport.validated_rain_threshold`` for consistency
+                with the two-stage classifier.  Defaults to 0.1 if not
+                provided, but callers should wire the validated threshold
+                from ``EDAPipeline`` to avoid drift between definitions.
+
+        Returns:
+            Dict with ADI, CV², classification, and model recommendations.
+        """
+        from ..config.resolve import resolve_date_col
+
+        date_col = resolve_date_col(date_col)
+        threshold = threshold if threshold is not None else 0.1
+
+        target_data = self.df[self.target_col]
+        rain_mask = target_data > threshold
+
+        n_rain = int(rain_mask.sum())
+        if n_rain < 2:
+            return {'classification': 'INSUFFICIENT_DATA', 'n_rain_events': n_rain}
+
+        # ADI: Average Demand Interval — use CALENDAR DAYS, not row indices.
+        # np.diff(positional_index) silently assumes no missing dates, which
+        # would shrink computed intervals if gaps exist.
+        # (data-leakage-prevention.md rule #7)
+        if date_col not in self.df.columns:
+            raise ValueError(
+                f"Date column '{date_col}' not found. analyze_intermittency() "
+                f"requires a date column for calendar-day-based ADI."
+            )
+
+        rain_dates = self.df.loc[rain_mask, date_col]
+        if not pd.api.types.is_datetime64_any_dtype(rain_dates):
+            rain_dates = pd.to_datetime(rain_dates)
+
+        rain_dates_sorted = rain_dates.sort_values()
+        intervals_days = rain_dates_sorted.diff().dt.days.dropna()
+        adi = float(intervals_days.mean())
+
+        # CV²: coefficient of variation squared of non-zero rainfall
+        rain_values = target_data[rain_mask]
+        cv2 = float((rain_values.std() / rain_values.mean()) ** 2)
+
+        # Syntetos-Boylan classification thresholds
+        ADI_THRESHOLD = 1.32
+        CV2_THRESHOLD = 0.49
+
+        if adi < ADI_THRESHOLD and cv2 < CV2_THRESHOLD:
+            classification = "SMOOTH"
+            model_rec = "Standard models (ARIMA, ML regression) appropriate"
+        elif adi < ADI_THRESHOLD and cv2 >= CV2_THRESHOLD:
+            classification = "ERRATIC"
+            model_rec = (
+                "Standard models OK but rainfall magnitude is volatile; "
+                "consider robust loss (Huber/quantile regression)"
+            )
+        elif adi >= ADI_THRESHOLD and cv2 < CV2_THRESHOLD:
+            classification = "INTERMITTENT"
+            model_rec = "Croston/SBA/TSB recommended over standard ARIMA"
+        else:
+            classification = "LUMPY"
+            model_rec = (
+                "TSB or IMAPA recommended; specialized intermittent-demand "
+                "models or Tweedie-loss single-stage regression are recommended "
+                "(two-stage is a legacy alternative but prone to recursive error propagation)"
+            )
+
+        result = {
+            'adi': adi,
+            'cv2': cv2,
+            'adi_threshold': ADI_THRESHOLD,
+            'cv2_threshold': CV2_THRESHOLD,
+            'classification': classification,
+            'model_recommendation': model_rec,
+            'rain_threshold_used': threshold,
+            'rain_day_pct': float(rain_mask.mean()),
+            'n_rain_events': n_rain,
+            'mean_rain_intensity_mm': float(rain_values.mean()),
+            'median_interval_days': float(intervals_days.median()),
+        }
+
+        print(f"\n📊 INTERMITTENCY ANALYSIS (Syntetos-Boylan)")
+        print(f"   Rain threshold: {threshold} mm")
+        print(f"   Rain events: {n_rain:,} / {len(target_data):,} "
+              f"({result['rain_day_pct']*100:.1f}%)")
+        print(f"   ADI (avg days between rain): {adi:.2f} "
+              f"(threshold {ADI_THRESHOLD})")
+        print(f"   CV² (rainfall variability):  {cv2:.2f} "
+              f"(threshold {CV2_THRESHOLD})")
+        print(f"   → Classification: {classification}")
+        print(f"   → Recommendation: {model_rec}")
+
+        return result
     
     def _run_normality_tests(self, data: pd.Series, col_name: str) -> Dict[str, Any]:
         """
@@ -791,10 +914,10 @@ class DistributionVisualizer:
         bars2 = ax2.bar(range(len(skew_kurt_df)), skew_kurt_df['Kurtosis'], 
                        color=colors, alpha=0.7)
         ax2.axhline(y=0, color='black', linestyle='-', linewidth=0.8, 
-                   label='Normal Kurtosis')
-        ax2.axhline(y=3, color='orange', linestyle='--', linewidth=0.8, 
-                   alpha=0.7, label='High Kurtosis')
-        ax2.axhline(y=-3, color='orange', linestyle='--', linewidth=0.8, alpha=0.7)
+                   label='Normal (excess kurtosis = 0)')
+        ax2.axhline(y=2, color='orange', linestyle='--', linewidth=0.8, 
+                   alpha=0.7, label='Leptokurtic threshold')
+        ax2.axhline(y=-2, color='orange', linestyle='--', linewidth=0.8, alpha=0.7)
         ax2.set_title('Kurtosis Comparison Across Features')
         ax2.set_xlabel('Features')
         ax2.set_ylabel('Kurtosis')
