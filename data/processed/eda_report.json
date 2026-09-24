@@ -1,0 +1,43 @@
+{
+  "suggested_sarima_order": [
+    3,
+    0,
+    3
+  ],
+  "suggested_seasonal_order": [
+    1,
+    1,
+    1,
+    7
+  ],
+  "vif_filtered_features": [
+    "Bức xạ sóng dài xuống",
+    "Áp suất bề mặt",
+    "Bức xạ khuếch tán"
+  ],
+  "validated_rain_threshold": 0.1,
+  "wet_season_months": [
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "representative_periods": [
+    7,
+    30,
+    122,
+    365
+  ],
+  "high_skew_features": [
+    15
+  ],
+  "extreme_event_thresholds": {},
+  "rain_threshold_justification": "0.1mm used as default — no strong bimodal gap detected. Consider domain expert review.",
+  "intermittency_classification": "LUMPY",
+  "intermittency_model_rec": "TSB or IMAPA recommended; specialized intermittent-demand models or Tweedie-loss single-stage regression are recommended (two-stage is a legacy alternative but prone to recursive error propagation)",
+  "intermittency_adi": 1.6400795404330535,
+  "intermittency_cv2": 2.015953751343479
+}
