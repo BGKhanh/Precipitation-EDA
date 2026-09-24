@@ -368,4 +368,121 @@ class RainfallTrainer:
         print("🎉 TRAINING PIPELINE COMPLETED")
         print(f"{'='*60}")
         
-        return results 
+        return results
+
+
+# ======================================================================
+# Factory functions: EDAReport → Model
+# ======================================================================
+
+def build_sarima_from_eda(report) -> "SARIMAModel":
+    """Build a SARIMAModel using orders suggested by EDAReport.
+
+    Args:
+        report: An ``EDAReport`` instance (from ``EDAPipeline.run()``).
+
+    Returns:
+        Unfitted ``SARIMAModel`` with data-driven order/seasonal_order.
+    """
+    from ..models.time_series import SARIMAModel
+
+    order = tuple(report.suggested_sarima_order)
+    seasonal_order = tuple(report.suggested_seasonal_order) if report.suggested_seasonal_order else None
+
+    print(f"   Building SARIMA{order}")
+    if seasonal_order:
+        print(f"   Seasonal order: {seasonal_order}")
+        return SARIMAModel(order=order, seasonal_order=seasonal_order)
+    else:
+        from ..models.time_series import ARIMAModel
+        return ARIMAModel(order=order)
+
+
+def build_two_stage_from_eda(model_cls, report, **kwargs):
+    """Build a two-stage rainfall model using EDAReport.
+
+    Uses ``report.validated_rain_threshold`` as the classification
+    threshold.
+
+    Args:
+        model_cls: Model class (e.g. ``RandomForestRainfallModel``).
+        report: An ``EDAReport`` instance.
+        **kwargs: Extra keyword arguments for the model constructor.
+
+    Returns:
+        Unfitted model instance.
+    """
+    threshold = report.validated_rain_threshold
+    print(f"   Building {model_cls.__name__} with threshold={threshold}")
+    return model_cls(
+        use_two_stage=True,
+        classification_threshold=threshold,
+        **kwargs,
+    )
+
+
+def build_stats_adapter_from_eda(
+    eda_report: Optional[Any] = None,
+    models: Optional[List[Any]] = None,
+    **kwargs,
+) -> "StatsForecastAdapter":
+    """Build a StatsForecastAdapter instance.
+
+    Args:
+        eda_report: Optional EDAReport instance for data-driven season lengths.
+        models: Custom list of model instances. If None, uses defaults from
+            ``get_default_stats_models(eda_report)``.
+        **kwargs: Additional keyword arguments for StatsForecastAdapter.
+
+    Returns:
+        Configured StatsForecastAdapter instance.
+    """
+    from ..models.nixtla import StatsForecastAdapter, get_default_stats_models
+    chosen_models = models if models is not None else get_default_stats_models(eda_report)
+    return StatsForecastAdapter(models=chosen_models, **kwargs)
+
+
+def build_ml_adapter_from_eda(
+    eda_report: Optional[Any] = None,
+    models: Optional[List[Any]] = None,
+    max_horizon: int = 7,
+    **kwargs,
+) -> "MLForecastAdapter":
+    """Build an MLForecastAdapter instance with direct multi-horizon forecasting.
+
+    Args:
+        eda_report: Optional EDAReport instance for hyperparameter defaults.
+        models: Custom list of model instances. If None, uses defaults from
+            ``get_default_ml_models(eda_report)``.
+        max_horizon: Maximum forecast horizon (H independent direct models). Default 7.
+        **kwargs: Additional keyword arguments for MLForecastAdapter.
+
+    Returns:
+        Configured MLForecastAdapter instance.
+    """
+    from ..models.nixtla import MLForecastAdapter, get_default_ml_models
+    chosen_models = models if models is not None else get_default_ml_models(eda_report)
+    return MLForecastAdapter(models=chosen_models, max_horizon=max_horizon, **kwargs)
+
+
+def build_neural_adapter_from_eda(
+    eda_report: Optional[Any] = None,
+    models: Optional[List[Any]] = None,
+    horizon: int = 7,
+    **kwargs,
+) -> "NeuralForecastAdapter":
+    """Build a NeuralForecastAdapter instance.
+
+    Args:
+        eda_report: Optional EDAReport instance.
+        models: Custom list of neural model instances. If None, uses defaults from
+            ``get_default_neural_models(eda_report, horizon=horizon)``.
+        horizon: Forecast horizon. Default 7.
+        **kwargs: Additional keyword arguments for NeuralForecastAdapter.
+
+    Returns:
+        Configured NeuralForecastAdapter instance.
+    """
+    from ..models.nixtla import NeuralForecastAdapter, get_default_neural_models
+    chosen_models = models if models is not None else get_default_neural_models(eda_report, horizon=horizon)
+    return NeuralForecastAdapter(models=chosen_models, horizon=horizon, **kwargs)

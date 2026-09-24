@@ -6,105 +6,18 @@ from typing import Dict, List, Tuple, Any, Optional
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.stattools import adfuller, kpss
 import warnings
 
 from .base import BaseTimeSeriesModel, calculate_metrics
+# StationarityTester lives in featurengineering (single source of truth)
+from ...featurengineering.stationarity_test import StationarityTester
 
 warnings.filterwarnings('ignore')
 
 
-class StationarityTester:
-    """
-    Utility class for testing and ensuring stationarity of time series.
-    """
-    
-    @staticmethod
-    def test_stationarity(series: pd.Series, verbose: bool = False) -> Dict[str, Any]:
-        """
-        Test stationarity using ADF and KPSS tests.
-        
-        Args:
-            series: Time series to test
-            verbose: Whether to print results
-            
-        Returns:
-            Dictionary with test results
-        """
-        # ADF Test (null hypothesis: unit root exists)
-        adf_result = adfuller(series.dropna())
-        adf_stationary = adf_result[1] < 0.05
-        
-        # KPSS Test (null hypothesis: series is stationary)
-        kpss_result = kpss(series.dropna())
-        kpss_stationary = kpss_result[1] > 0.05
-        
-        # Overall conclusion
-        if adf_stationary and kpss_stationary:
-            conclusion = "STATIONARY"
-        elif not adf_stationary and not kpss_stationary:
-            conclusion = "NON-STATIONARY"
-        else:
-            conclusion = "INCONCLUSIVE"
-        
-        results = {
-            'series_name': series.name or 'unnamed',
-            'ADF_statistic': adf_result[0],
-            'ADF_pvalue': adf_result[1],
-            'ADF_stationary': adf_stationary,
-            'KPSS_statistic': kpss_result[0],
-            'KPSS_pvalue': kpss_result[1],
-            'KPSS_stationary': kpss_stationary,
-            'conclusion': conclusion
-        }
-        
-        if verbose:
-            print(f"📊 Stationarity Test: {results['series_name']}")
-            print(f"   ADF p-value: {results['ADF_pvalue']:.6f} ({'Stationary' if adf_stationary else 'Non-stationary'})")
-            print(f"   KPSS p-value: {results['KPSS_pvalue']:.6f} ({'Stationary' if kpss_stationary else 'Non-stationary'})")
-            print(f"   ➤ Conclusion: {conclusion}")
-        
-        return results
-    
-    @staticmethod
-    def make_stationary(data: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
-        """
-        Make all columns in DataFrame stationary by differencing if needed.
-        
-        Args:
-            data: DataFrame with time series columns
-            verbose: Whether to print transformation details
-            
-        Returns:
-            DataFrame with stationary series
-        """
-        if verbose:
-            print("🩺 Checking and transforming variables for stationarity...")
-        
-        stationary_data = pd.DataFrame(index=data.index)
-        
-        for col in data.columns:
-            # Test stationarity
-            test_result = StationarityTester.test_stationarity(data[col])
-            
-            if test_result['conclusion'] == 'NON-STATIONARY':
-                # Apply first difference
-                stationary_data[col] = data[col].diff()
-                if verbose:
-                    print(f"   - Column '{col}' is non-stationary. Applying differencing.")
-            else:
-                # Use as is
-                stationary_data[col] = data[col]
-                if verbose:
-                    print(f"   - Column '{col}' is stationary.")
-        
-        # Drop NaNs created by differencing
-        stationary_data = stationary_data.dropna()
-        
-        if verbose:
-            print("   ✅ All variables are now stationary.")
-        
-        return stationary_data
+# StationarityTester class removed — now imported from
+# src.featurengineering.stationarity_test (single source of truth).
+# The import is at the top of this file.
 
 
 class ARIMAModel(BaseTimeSeriesModel):
@@ -155,6 +68,26 @@ class ARIMAModel(BaseTimeSeriesModel):
         """
         self._validate_fitted()
         return self.fitted_model.forecast(steps=steps)
+
+    def forecast_with_interval(
+        self, steps: int, alpha: float = 0.05
+    ) -> Tuple[np.ndarray, pd.DataFrame]:
+        """Forecast with confidence intervals.
+
+        Args:
+            steps: Number of steps to forecast.
+            alpha: Significance level (0.05 = 95% CI).
+
+        Returns:
+            ``(point_forecast, conf_int_df)`` where *conf_int_df* has
+            columns ``['lower', 'upper']``.
+        """
+        self._validate_fitted()
+        result = self.fitted_model.get_forecast(steps=steps)
+        point = result.predicted_mean.values
+        ci = result.conf_int(alpha=alpha)
+        ci.columns = ['lower', 'upper']
+        return point, ci
 
 
 class SARIMAModel(BaseTimeSeriesModel):
@@ -208,6 +141,26 @@ class SARIMAModel(BaseTimeSeriesModel):
         """
         self._validate_fitted()
         return self.fitted_model.forecast(steps=steps)
+
+    def forecast_with_interval(
+        self, steps: int, alpha: float = 0.05
+    ) -> Tuple[np.ndarray, pd.DataFrame]:
+        """Forecast with confidence intervals.
+
+        Args:
+            steps: Number of steps to forecast.
+            alpha: Significance level (0.05 = 95% CI).
+
+        Returns:
+            ``(point_forecast, conf_int_df)`` where *conf_int_df* has
+            columns ``['lower', 'upper']``.
+        """
+        self._validate_fitted()
+        result = self.fitted_model.get_forecast(steps=steps)
+        point = result.predicted_mean.values
+        ci = result.conf_int(alpha=alpha)
+        ci.columns = ['lower', 'upper']
+        return point, ci
 
 
 class ARIMAXModel(BaseTimeSeriesModel):
