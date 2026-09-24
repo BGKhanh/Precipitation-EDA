@@ -35,7 +35,7 @@ def select_features(df: pd.DataFrame,
         strong_features = ['Nhiệt độ tối đa 2m', 'Độ ẩm tương đối 2m', 'Áp suất bề mặt']
         df_selected = select_features(df, strong_features)
     """
-    print(f"📊 SELECTING FEATURES")
+    print(f"[FEATURES] SELECTING FEATURES")
     print(f"   Features to select: {len(features_to_keep)}")
     
     # Get default columns if not provided
@@ -56,13 +56,13 @@ def select_features(df: pd.DataFrame,
         if feature in df.columns and feature not in final_cols:
             final_cols.append(feature)
         elif feature not in df.columns:
-            print(f"   ⚠️ Feature '{feature}' not found in DataFrame")
+            print(f"   [WARN] Feature '{feature}' not found in DataFrame")
     
     df_selected = df[final_cols].copy()
     
     print(f"   Original shape: {df.shape}")
     print(f"   Selected shape: {df_selected.shape}")
-    print(f"   ✅ Feature selection completed")
+    print(f"   [OK] Feature selection completed")
     
     return df_selected
 
@@ -88,7 +88,7 @@ def create_temporal_features(df: pd.DataFrame,
         temporal_features = ['Month_sin', 'Month_cos', 'Is_Wet_Season']
         df_temporal = create_temporal_features(df, features_to_create=temporal_features)
     """
-    print(f"🕒 CREATING TEMPORAL FEATURES")
+    print(f"[TEMPORAL] CREATING TEMPORAL FEATURES")
     
     # Default parameters
     date_col = date_col or Config.COLUMN_MAPPING.get('DATE', 'Ngày')
@@ -102,7 +102,7 @@ def create_temporal_features(df: pd.DataFrame,
     # Ensure date column is datetime
     if not pd.api.types.is_datetime64_any_dtype(df_temporal[date_col]):
         df_temporal[date_col] = pd.to_datetime(df_temporal[date_col])
-        print(f"   ✅ Converted {date_col} to datetime")
+        print(f"   [OK] Converted {date_col} to datetime")
     
     feature_count = 0
     
@@ -141,13 +141,13 @@ def create_temporal_features(df: pd.DataFrame,
             df_temporal['Is_Wet_Season'] = df_temporal['_temp_month'].isin(wet_season_months).astype(int)
             feature_count += 1
         else:
-            print(f"   ⚠️ Unknown temporal feature: {feature}")
+            print(f"   [WARN] Unknown temporal feature: {feature}")
     
     # Clean up temporary columns
     temp_cols = [col for col in df_temporal.columns if col.startswith('_temp_')]
     df_temporal = df_temporal.drop(columns=temp_cols)
     
-    print(f"   ✅ Created {feature_count} temporal features")
+    print(f"   [OK] Created {feature_count} temporal features")
     print(f"   Dataset shape: {df_temporal.shape}")
     
     return df_temporal
@@ -174,7 +174,7 @@ def create_lag_features(df: pd.DataFrame,
         df_lag = create_lag_features(df, 'Lượng mưa', [1, 2, 3, 7])
         df_lag = create_lag_features(df_lag, ['Nhiệt độ tối đa 2m'], [1])
     """
-    print(f"⏰ CREATING LAG FEATURES")
+    print(f"[LAG] CREATING LAG FEATURES")
     
     if isinstance(columns_to_lag, str):
         columns_to_lag = [columns_to_lag]
@@ -184,7 +184,7 @@ def create_lag_features(df: pd.DataFrame,
     
     for column in columns_to_lag:
         if column not in df_lag.columns:
-            print(f"   ⚠️ Column '{column}' not found")
+            print(f"   [WARN] Column '{column}' not found")
             continue
         
         for lag in lags:
@@ -192,7 +192,7 @@ def create_lag_features(df: pd.DataFrame,
             df_lag[feature_name] = df_lag[column].shift(lag)
             feature_count += 1
     
-    print(f"   ✅ Created {feature_count} lag features")
+    print(f"   [OK] Created {feature_count} lag features")
     print(f"   Columns lagged: {columns_to_lag}")
     print(f"   Lag periods: {lags}")
     print(f"   Dataset shape: {df_lag.shape}")
@@ -201,27 +201,38 @@ def create_lag_features(df: pd.DataFrame,
 
 
 def create_rolling_features(df: pd.DataFrame,
-                          columns_to_roll: Union[str, List[str]],
-                          windows: List[int],
-                          stats: List[str] = ['mean', 'std', 'min', 'max', 'sum']) -> pd.DataFrame:
+                           columns_to_roll: Union[str, List[str]],
+                           windows: List[int],
+                           stats: List[str] = ['mean', 'std', 'min', 'max', 'sum'],
+                           include_current: bool = False) -> pd.DataFrame:
     """
-    Create rolling window features for specified columns
-    
+    Create rolling window features for specified columns.
+
+    By default, the series is **shifted by 1 period before rolling** so
+    that the current row's value is excluded from the window.  This
+    prevents target-in-feature leakage when rolling the target (or a
+    target-derived) column.
+
     Args:
         df: Input DataFrame
         columns_to_roll: Column name(s) to create rolling features for
         windows: List of window sizes
         stats: List of statistics to calculate
-        
+        include_current: If ``True``, do NOT shift before rolling —
+            only set this for columns that are NOT the target and
+            where there is a deliberate reason (rare).
+
     Returns:
         DataFrame with rolling features added
-        
+
     Example:
         # User decides based on temporal analysis
         df_rolling = create_rolling_features(df, 'Lượng mưa', [7, 14, 30], ['sum', 'mean'])
         df_rolling = create_rolling_features(df_rolling, ['Nhiệt độ tối đa 2m'], [7], ['mean', 'std'])
     """
-    print(f"🪟 CREATING ROLLING FEATURES")
+    print(f"[ROLLING] CREATING ROLLING FEATURES")
+    if not include_current:
+        print(f"   [LEAK-SAFE] Leakage-safe mode: shift(1) applied before rolling")
     
     if isinstance(columns_to_roll, str):
         columns_to_roll = [columns_to_roll]
@@ -229,32 +240,33 @@ def create_rolling_features(df: pd.DataFrame,
     df_rolling = df.copy()
     feature_count = 0
     
+    stat_funcs = {
+        'mean': lambda s, w: s.rolling(window=w).mean(),
+        'std':  lambda s, w: s.rolling(window=w).std(),
+        'min':  lambda s, w: s.rolling(window=w).min(),
+        'max':  lambda s, w: s.rolling(window=w).max(),
+        'sum':  lambda s, w: s.rolling(window=w).sum(),
+    }
+    
     for column in columns_to_roll:
         if column not in df_rolling.columns:
-            print(f"   ⚠️ Column '{column}' not found")
+            print(f"   [WARN] Column '{column}' not found")
             continue
+        
+        # Shift to exclude current row (leakage prevention)
+        series = df_rolling[column] if include_current else df_rolling[column].shift(1)
         
         for window in windows:
             for stat in stats:
-                feature_name = f'{column}_{stat}_{window}d'
-                
-                if stat == 'mean':
-                    df_rolling[feature_name] = df_rolling[column].rolling(window=window).mean()
-                elif stat == 'std':
-                    df_rolling[feature_name] = df_rolling[column].rolling(window=window).std()
-                elif stat == 'min':
-                    df_rolling[feature_name] = df_rolling[column].rolling(window=window).min()
-                elif stat == 'max':
-                    df_rolling[feature_name] = df_rolling[column].rolling(window=window).max()
-                elif stat == 'sum':
-                    df_rolling[feature_name] = df_rolling[column].rolling(window=window).sum()
-                else:
-                    print(f"   ⚠️ Unknown statistic: {stat}")
+                if stat not in stat_funcs:
+                    print(f"   [WARN] Unknown statistic: {stat}")
                     continue
                 
+                feature_name = f'{column}_{stat}_{window}d'
+                df_rolling[feature_name] = stat_funcs[stat](series, window)
                 feature_count += 1
     
-    print(f"   ✅ Created {feature_count} rolling features")
+    print(f"   [OK] Created {feature_count} rolling features")
     print(f"   Columns: {columns_to_roll}")
     print(f"   Windows: {windows}")
     print(f"   Statistics: {stats}")
@@ -282,14 +294,14 @@ def create_interaction_features(df: pd.DataFrame,
         pairs = [('Nhiệt độ tối đa 2m', 'Độ ẩm tương đối 2m')]
         df_interact = create_interaction_features(df, pairs, ['multiply'])
     """
-    print(f"🔗 CREATING INTERACTION FEATURES")
+    print(f"[INTERACTION] CREATING INTERACTION FEATURES")
     
     df_interact = df.copy()
     feature_count = 0
     
     for feature1, feature2 in feature_pairs:
         if feature1 not in df_interact.columns or feature2 not in df_interact.columns:
-            print(f"   ⚠️ Feature pair ({feature1}, {feature2}) not found")
+            print(f"   [WARN] Feature pair ({feature1}, {feature2}) not found")
             continue
         
         for operation in operations:
@@ -306,12 +318,12 @@ def create_interaction_features(df: pd.DataFrame,
                 feature_name = f'{feature1}_minus_{feature2}'
                 df_interact[feature_name] = df_interact[feature1] - df_interact[feature2]
             else:
-                print(f"   ⚠️ Unknown operation: {operation}")
+                print(f"   [WARN] Unknown operation: {operation}")
                 continue
             
             feature_count += 1
     
-    print(f"   ✅ Created {feature_count} interaction features")
+    print(f"   [OK] Created {feature_count} interaction features")
     print(f"   Feature pairs: {len(feature_pairs)}")
     print(f"   Operations: {operations}")
     print(f"   Dataset shape: {df_interact.shape}")
@@ -319,28 +331,84 @@ def create_interaction_features(df: pd.DataFrame,
     return df_interact
 
 
+# -------------------------------------------------------------------------
+# Missing-value imputation: fit / apply separation (leakage-safe)
+# -------------------------------------------------------------------------
+
+def fit_missing_value_stats(
+    train_df: pd.DataFrame,
+    strategy: str = 'fill_mean',
+) -> Dict[str, Any]:
+    """Compute imputation statistics on **training data only**.
+
+    The returned dict is then passed to :func:`apply_missing_value_fill`
+    which can be called on *any* split (train, test, forecast-time).
+
+    Args:
+        train_df: Training split — the *only* data this function may see.
+        strategy: ``'fill_mean'`` or ``'fill_median'``.
+
+    Returns:
+        Dict with ``{'strategy': ..., 'fill_values': {col: value}}``.
+    """
+    numeric_cols = train_df.select_dtypes(include=[np.number]).columns
+    if strategy == 'fill_mean':
+        fill_values = {col: train_df[col].mean() for col in numeric_cols}
+    elif strategy == 'fill_median':
+        fill_values = {col: train_df[col].median() for col in numeric_cols}
+    else:
+        raise ValueError(f"strategy must be 'fill_mean' or 'fill_median', got '{strategy}'")
+
+    print(f"[STATS] fit_missing_value_stats: computed {strategy} for {len(fill_values)} columns (train only)")
+    return {'strategy': strategy, 'fill_values': fill_values}
+
+
+def apply_missing_value_fill(
+    df: pd.DataFrame,
+    stats: Dict[str, Any],
+) -> pd.DataFrame:
+    """Apply imputation using pre-computed stats from :func:`fit_missing_value_stats`.
+
+    Safe to call on train, test, or forecast-time data — no new statistics
+    are computed from *df*.
+    """
+    df_filled = df.copy()
+    fill_values = stats['fill_values']
+    filled_count = 0
+    for col, value in fill_values.items():
+        if col in df_filled.columns:
+            n_missing = df_filled[col].isnull().sum()
+            if n_missing > 0:
+                df_filled[col] = df_filled[col].fillna(value)
+                filled_count += n_missing
+    print(f"[FEATURE-APPLY] apply_missing_value_fill: filled {filled_count} values using train-derived stats")
+    return df_filled
+
+
 def handle_missing_values(df: pd.DataFrame,
                          strategy: str = 'drop',
                          threshold: float = 0.8,
                          date_col: str = None) -> pd.DataFrame:
+    """Handle missing values in DataFrame.
+
+    .. deprecated::
+        For ``strategy='fill_mean'``, use :func:`fit_missing_value_stats`
+        + :func:`apply_missing_value_fill` instead to avoid global-fit
+        leakage.  The ``'drop'`` and ``'fill_forward'`` strategies remain
+        safe because they don't compute dataset-wide statistics.
     """
-    Handle missing values in DataFrame
-    
-    Args:
-        df: Input DataFrame
-        strategy: Strategy for handling missing values ('drop', 'fill_forward', 'fill_mean')
-        threshold: Threshold for dropping columns (fraction of non-null values required)
-        date_col: Date column name for reporting
-        
-    Returns:
-        DataFrame with missing values handled
-        
-    Example:
-        # User decides how to handle missing values
-        df_clean = handle_missing_values(df, strategy='drop')
-    """
-    print(f"🗑️ HANDLING MISSING VALUES")
+    print(f"[DROP] HANDLING MISSING VALUES")
     print(f"   Strategy: {strategy}")
+    
+    if strategy == 'fill_mean':
+        warnings.warn(
+            "handle_missing_values(strategy='fill_mean') computes means on "
+            "whatever DataFrame is passed in.  If this is the full dataset "
+            "(pre-split), this leaks test information into training.  "
+            "Use fit_missing_value_stats() + apply_missing_value_fill() instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
     
     date_col = date_col or Config.COLUMN_MAPPING.get('DATE', 'Ngày')
     
@@ -351,35 +419,27 @@ def handle_missing_values(df: pd.DataFrame,
     print(f"   Missing values: {missing_count}")
     
     if missing_count == 0:
-        print(f"   ✅ No missing values found")
+        print(f"   [OK] No missing values found")
         return df.copy()
     
     df_handled = df.copy()
     
     if strategy == 'drop':
-        # Drop rows with any missing values
         df_handled = df_handled.dropna().reset_index(drop=True)
-        
     elif strategy == 'fill_forward':
-        # Forward fill missing values
         df_handled = df_handled.fillna(method='ffill')
-        
     elif strategy == 'fill_mean':
-        # Fill with column means (for numeric columns only)
         numeric_cols = df_handled.select_dtypes(include=[np.number]).columns
         for col in numeric_cols:
             df_handled[col] = df_handled[col].fillna(df_handled[col].mean())
-    
     elif strategy == 'drop_columns':
-        # Drop columns with too many missing values
         keep_cols = []
         for col in df_handled.columns:
             non_null_ratio = df_handled[col].count() / len(df_handled)
             if non_null_ratio >= threshold:
                 keep_cols.append(col)
             else:
-                print(f"   🗑️ Dropping column '{col}' (only {non_null_ratio:.1%} non-null)")
-        
+                print(f"   [DROP] Dropping column '{col}' (only {non_null_ratio:.1%} non-null)")
         df_handled = df_handled[keep_cols]
     
     final_shape = df_handled.shape
@@ -389,109 +449,161 @@ def handle_missing_values(df: pd.DataFrame,
     print(f"   Rows removed: {original_shape[0] - final_shape[0]}")
     print(f"   Missing values remaining: {final_missing}")
     
-    # Report date range if date column exists
     if date_col in df_handled.columns:
         print(f"   Date range: {df_handled[date_col].min()} to {df_handled[date_col].max()}")
     
-    print(f"   ✅ Missing value handling completed")
+    print(f"   [OK] Missing value handling completed")
     
     return df_handled
+
+
+# -------------------------------------------------------------------------
+# Feature quality validation: fit / filter separation (leakage-safe)
+# -------------------------------------------------------------------------
+
+def fit_feature_quality(
+    train_df: pd.DataFrame,
+    target_col: str = None,
+    correlation_threshold: float = 0.05,
+    variance_threshold: float = 0.01,
+) -> Dict[str, Any]:
+    """Compute feature-quality stats on **training data only**.
+
+    Returns a stats dict that can be passed to :func:`filter_features`
+    to apply the same column filter to any split (train, test, forecast).
+
+    Args:
+        train_df: Training split — the *only* data this function may see.
+        target_col: Target variable column name.
+        correlation_threshold: Min |correlation| with target to keep.
+        variance_threshold: Min variance to keep.
+
+    Returns:
+        Dict with ``{'feature_stats': ..., 'recommended_to_keep': [...],
+        'recommended_to_drop': [...], 'thresholds': {...}}``.
+    """
+    target_col = target_col or Config.COLUMN_MAPPING.get('PRECTOTCORR', 'Lượng mưa')
+
+    if target_col not in train_df.columns:
+        raise ValueError(f"Target column '{target_col}' not found")
+
+    numeric_cols = train_df.select_dtypes(include=[np.number]).columns.tolist()
+    feature_cols = [col for col in numeric_cols if col != target_col]
+
+    feature_stats = {}
+    low_correlation = []
+    low_variance = []
+    high_missing = []
+
+    for feature in feature_cols:
+        correlation = train_df[feature].corr(train_df[target_col])
+        variance = train_df[feature].var()
+        missing_pct = train_df[feature].isnull().mean()
+
+        feature_stats[feature] = {
+            'correlation': correlation,
+            'variance': variance,
+            'missing_pct': missing_pct,
+        }
+
+        if abs(correlation) < correlation_threshold:
+            low_correlation.append(feature)
+        if variance < variance_threshold:
+            low_variance.append(feature)
+        if missing_pct > 0.1:
+            high_missing.append(feature)
+
+    recommended_to_drop = list(set(low_correlation + low_variance + high_missing))
+    recommended_to_keep = [f for f in feature_cols if f not in recommended_to_drop]
+
+    print(f"[STATS] fit_feature_quality: {len(feature_cols)} features analyzed (train only)")
+    print(f"   Keep: {len(recommended_to_keep)}, Drop: {len(recommended_to_drop)}")
+
+    return {
+        'feature_stats': feature_stats,
+        'recommended_to_keep': recommended_to_keep,
+        'recommended_to_drop': recommended_to_drop,
+        'thresholds': {
+            'correlation': correlation_threshold,
+            'variance': variance_threshold,
+        },
+    }
+
+
+def filter_features(
+    df: pd.DataFrame,
+    quality_stats: Dict[str, Any],
+    target_col: str = None,
+    date_col: str = None,
+) -> pd.DataFrame:
+    """Drop low-quality features using stats from :func:`fit_feature_quality`.
+
+    Safe to call on train, test, or forecast-time data — no new statistics
+    are computed from *df*.
+    """
+    target_col = target_col or Config.COLUMN_MAPPING.get('PRECTOTCORR', 'Lượng mưa')
+    date_col = date_col or Config.COLUMN_MAPPING.get('DATE', 'Ngày')
+
+    keep = quality_stats['recommended_to_keep']
+    # Always keep target and date columns
+    essential = [c for c in [target_col, date_col] if c in df.columns]
+    final_cols = essential + [c for c in keep if c in df.columns and c not in essential]
+
+    df_filtered = df[final_cols].copy()
+    print(f"[FEATURE-APPLY] filter_features: {df.shape[1]} → {df_filtered.shape[1]} columns")
+    return df_filtered
 
 
 def validate_feature_quality(df: pd.DataFrame,
                            target_col: str = None,
                            correlation_threshold: float = 0.05,
                            variance_threshold: float = 0.01) -> Dict[str, Any]:
+    """Validate quality of engineered features.
+
+    .. deprecated::
+        This function computes correlation/variance on whatever DataFrame
+        is passed in.  If called on the full dataset (pre-split), test
+        information leaks into the feature-selection decision.  Use
+        :func:`fit_feature_quality` + :func:`filter_features` instead.
     """
-    Validate quality of engineered features
-    
-    Args:
-        df: DataFrame with features
-        target_col: Target variable column name
-        correlation_threshold: Minimum correlation with target to keep feature
-        variance_threshold: Minimum variance to keep feature
-        
-    Returns:
-        Dictionary with validation results and recommendations
-        
-    Example:
-        # User validates engineered features
-        validation = validate_feature_quality(df_engineered)
-        print(validation['summary'])
-    """
-    print(f"✅ VALIDATING FEATURE QUALITY")
-    
-    target_col = target_col or Config.COLUMN_MAPPING.get('PRECTOTCORR', 'Lượng mưa')
-    
-    if target_col not in df.columns:
-        raise ValueError(f"Target column '{target_col}' not found")
-    
-    # Get numeric columns (excluding target)
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    feature_cols = [col for col in numeric_cols if col != target_col]
-    
+    warnings.warn(
+        "validate_feature_quality() computes stats on whatever df is passed in. "
+        "If this is the full dataset (pre-split), this leaks test information "
+        "into feature selection. Use fit_feature_quality() + filter_features() "
+        "instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
+
+    # Delegate to the new fit function (caller's responsibility for split)
+    stats = fit_feature_quality(df, target_col, correlation_threshold, variance_threshold)
+
+    # Build legacy return format
     validation_results = {
-        'total_features': len(feature_cols),
-        'low_correlation': [],
-        'low_variance': [],
-        'high_missing': [],
-        'recommended_to_drop': [],
-        'feature_stats': {}
+        'total_features': len(stats['feature_stats']),
+        'low_correlation': [f for f, s in stats['feature_stats'].items()
+                           if abs(s['correlation']) < correlation_threshold],
+        'low_variance': [f for f, s in stats['feature_stats'].items()
+                        if s['variance'] < variance_threshold],
+        'high_missing': [f for f, s in stats['feature_stats'].items()
+                        if s['missing_pct'] > 0.1],
+        'recommended_to_drop': stats['recommended_to_drop'],
+        'feature_stats': stats['feature_stats'],
     }
-    
-    print(f"   Analyzing {len(feature_cols)} features...")
-    
-    for feature in feature_cols:
-        stats = {}
-        
-        # Calculate correlation with target
-        correlation = df[feature].corr(df[target_col])
-        stats['correlation'] = correlation
-        
-        # Calculate variance
-        variance = df[feature].var()
-        stats['variance'] = variance
-        
-        # Calculate missing percentage
-        missing_pct = df[feature].isnull().mean()
-        stats['missing_pct'] = missing_pct
-        
-        validation_results['feature_stats'][feature] = stats
-        
-        # Flag low correlation features
-        if abs(correlation) < correlation_threshold:
-            validation_results['low_correlation'].append(feature)
-        
-        # Flag low variance features
-        if variance < variance_threshold:
-            validation_results['low_variance'].append(feature)
-        
-        # Flag high missing features
-        if missing_pct > 0.1:  # More than 10% missing
-            validation_results['high_missing'].append(feature)
-    
-    # Combine recommendations
-    all_flagged = set(validation_results['low_correlation'] + 
-                     validation_results['low_variance'] + 
-                     validation_results['high_missing'])
-    validation_results['recommended_to_drop'] = list(all_flagged)
-    
-    # Create summary
+
     summary = f"""
-📊 FEATURE QUALITY VALIDATION:
-   • Total features: {validation_results['total_features']}
-   • Low correlation (|r| < {correlation_threshold}): {len(validation_results['low_correlation'])}
-   • Low variance (< {variance_threshold}): {len(validation_results['low_variance'])}
-   • High missing (> 10%): {len(validation_results['high_missing'])}
-   • Recommended to drop: {len(validation_results['recommended_to_drop'])}
-   • Good quality features: {validation_results['total_features'] - len(validation_results['recommended_to_drop'])}
+[FEATURES] FEATURE QUALITY VALIDATION:
+   * Total features: {validation_results['total_features']}
+   * Low correlation (|r| < {correlation_threshold}): {len(validation_results['low_correlation'])}
+   * Low variance (< {variance_threshold}): {len(validation_results['low_variance'])}
+   * High missing (> 10%): {len(validation_results['high_missing'])}
+   * Recommended to drop: {len(validation_results['recommended_to_drop'])}
+   * Good quality features: {validation_results['total_features'] - len(validation_results['recommended_to_drop'])}
 """
-    
     validation_results['summary'] = summary
-    
     print(summary)
-    print(f"   ✅ Feature validation completed")
-    
+    print(f"   [OK] Feature validation completed")
+
     return validation_results
 
 
@@ -533,11 +645,11 @@ def create_mstl_features(df: pd.DataFrame,
                                       rolling_windows=[7, 30],
                                       rolling_stats=['mean', 'std'])
     """
-    print(f"📊 ADDING MSTL FEATURES")
+    print(f"[FEATURES] ADDING MSTL FEATURES")
     
     # Check if MSTL was successful
     if not mstl_results.get('success', False):
-        print(f"   ❌ MSTL decomposition failed, cannot add features")
+        print(f"   [ERROR] MSTL decomposition failed, cannot add features")
         return df.copy()
     
     date_col = date_col or Config.COLUMN_MAPPING.get('DATE', 'Ngày')
@@ -580,24 +692,24 @@ def create_mstl_features(df: pd.DataFrame,
     
     # Report MSTL features added
     mstl_feature_names = list(mstl_features.keys())
-    print(f"   ✅ Added {len(mstl_feature_names)} MSTL features:")
+    print(f"   [OK] Added {len(mstl_feature_names)} MSTL features:")
     for feat in mstl_feature_names:
         if feat in df_result.columns:
             missing_count = df_result[feat].isnull().sum()
-            print(f"      • {feat}: {missing_count} missing values")
+            print(f"      * {feat}: {missing_count} missing values")
     
     # Create lag features if requested
     if lag_periods is not None:
-        print(f"\n   🕒 Creating lag features for MSTL components...")
+        print(f"\n   [TEMPORAL] Creating lag features for MSTL components...")
         df_result = create_lag_features(df_result, mstl_feature_names, lag_periods)
     
     # Create rolling features if requested
     if rolling_windows is not None:
         rolling_stats = rolling_stats or ['mean']  # Default to mean if not specified
-        print(f"\n   🪟 Creating rolling features for MSTL components...")
+        print(f"\n   [ROLLING] Creating rolling features for MSTL components...")
         df_result = create_rolling_features(df_result, mstl_feature_names, rolling_windows, rolling_stats)
     
-    print(f"\n   📊 Final shape: {df_result.shape}")
+    print(f"\n   [FEATURES] Final shape: {df_result.shape}")
     return df_result
 
 
@@ -626,7 +738,7 @@ def apply_feature_engineering_steps(df: pd.DataFrame,
         ]
         df_final = apply_feature_engineering_steps(df, steps)
     """
-    print(f"🔄 APPLYING FEATURE ENGINEERING STEPS")
+    print(f"[TRANSFORM] APPLYING FEATURE ENGINEERING STEPS")
     print(f"   Number of steps: {len(steps)}")
     
     df_result = df.copy()
@@ -652,9 +764,9 @@ def apply_feature_engineering_steps(df: pd.DataFrame,
             function = available_functions[function_name]
             df_result = function(df_result, **params)
         else:
-            print(f"   ⚠️ Unknown function: {function_name}")
+            print(f"   [WARN] Unknown function: {function_name}")
     
-    print(f"\n   ✅ All steps completed")
+    print(f"\n   [OK] All steps completed")
     print(f"   Final shape: {df_result.shape}")
     
     return df_result 
