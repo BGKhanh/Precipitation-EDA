@@ -89,8 +89,13 @@ class DataLoader:
         logger.info("Loading weather data from %s", filepath)
 
         if not filepath.exists():
-            logger.error("File not found: %s", filepath)
-            return None
+            # Check legacy directory fallback for backward compatibility
+            legacy_filepath = self.config.PROJECT_ROOT / "nasa_power_hcmc_data" / filename
+            if legacy_filepath.exists():
+                filepath = legacy_filepath
+            else:
+                logger.error("File not found: %s (also checked %s)", filepath, legacy_filepath)
+                return None
 
         df = self._read_csv(filepath)
         if df is None:

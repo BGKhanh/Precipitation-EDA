@@ -47,22 +47,15 @@ def assert_raises(exc_type, match=None):
 
 
 
-def test_models_central_package_and_forecasting_deprecation():
-    """Verify src.models is central hub and src.forecasting emits DeprecationWarning."""
-    # 1. src.forecasting must emit DeprecationWarning
-    with warnings.catch_warnings(record=True) as recorded:
-        warnings.simplefilter("always")
-        import src.forecasting as forecasting
-
-        assert any(
-            issubclass(w.category, DeprecationWarning)
-            and "src.forecasting is deprecated" in str(w.message)
-            for w in recorded
-        ), "DeprecationWarning was not emitted when importing src.forecasting"
-
-    # Backward compatibility of forecasting shim
-    assert hasattr(forecasting, "RecursiveForecaster")
-    assert hasattr(forecasting, "MLForecastAdapter")
+def test_models_central_package_and_no_forecasting_module():
+    """Verify src.models is central hub and src.forecasting is completely removed."""
+    # 1. src.forecasting must NOT exist as a separate module (eliminated in favor of src.models)
+    import importlib
+    try:
+        importlib.import_module("src.forecasting")
+        assert False, "src.forecasting still exists, should be deleted"
+    except ModuleNotFoundError:
+        pass
 
     # 2. src.models is central package (clean imports, exports both legacy and nixtla)
     import src.models as models
@@ -216,7 +209,7 @@ def test_unified_benchmark_execution():
 
 if __name__ == "__main__":
     tests = [
-        test_models_central_package_and_forecasting_deprecation,
+        test_models_central_package_and_no_forecasting_module,
         test_leakage_guard_code_assertion,
         test_mlforecast_adapter_direct_max_horizon,
         test_flexible_wrapper_model_override,

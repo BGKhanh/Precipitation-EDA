@@ -8,10 +8,11 @@ class Config:
     
     # Project paths
     PROJECT_ROOT = Path(__file__).parent.parent.parent
-    # NOTE: Thư mục dữ liệu hiện tại chỉ phục vụ pipeline cho TP.HCM.
-    # Nếu mở rộng crawl cho các tỉnh khác (xem province_coordinates),
-    # cần refactor DATA_DIR và filename convention trong crawler.py / loader.py.
-    DATA_DIR = PROJECT_ROOT / "nasa_power_hcmc_data"
+    DATA_ROOT = PROJECT_ROOT / "data"
+    RAW_DATA_DIR = DATA_ROOT / "raw"
+    PROCESSED_DATA_DIR = DATA_ROOT / "processed"
+    # Canonical DATA_DIR points to data/raw for raw data ingestion & crawling
+    DATA_DIR = RAW_DATA_DIR
     NOTEBOOKS_DIR = PROJECT_ROOT / "notebooks"
     
     # NASA POWER API configuration
