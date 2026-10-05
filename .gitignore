@@ -200,3 +200,11 @@ Báo cáo Phân tích Khám phá Dữ liệu.docx
 .agents/**
 
 tasks/**
+
+scripts/**
+
+scratch/**
+
+lightning_logs/**
+
+tests/**
