@@ -256,22 +256,28 @@ def get_default_contract() -> Dict[str, Any]:
     }
 
 
+FORECAST_HORIZON = 7
+CONTEXT_LENGTH = 30
+SEASON_LENGTH = 7
+RAIN_THRESHOLD = 0.1
+TARGET_COL = "Lượng mưa"
+DATE_COL = "Ngày"
+
+
 def save_modeling_contract(contract: Optional[Dict[str, Any]] = None, filepath: Path = CONTRACT_PATH) -> None:
-    """Save the formal modeling contract JSON."""
+    """Save the formal modeling contract JSON (optional utility)."""
     c = contract or get_default_contract()
     filepath.parent.mkdir(parents=True, exist_ok=True)
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(c, f, indent=2, ensure_ascii=False)
 
 
-def load_modeling_contract(filepath: Path = CONTRACT_PATH) -> Dict[str, Any]:
-    """Load the modeling contract JSON, or generate default if absent."""
-    if filepath.exists():
+def load_modeling_contract(filepath: Optional[Path] = None) -> Dict[str, Any]:
+    """Load the modeling contract specification in-memory (or from file if explicitly provided and exists)."""
+    if filepath is not None and filepath.exists():
         with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
-    contract = get_default_contract()
-    save_modeling_contract(contract, filepath)
-    return contract
+    return get_default_contract()
 
 
 # ======================================================================

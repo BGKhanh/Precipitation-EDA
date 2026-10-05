@@ -29,6 +29,12 @@ from .protocols import (
     get_default_contract,
     save_modeling_contract,
     load_modeling_contract,
+    FORECAST_HORIZON,
+    CONTEXT_LENGTH,
+    SEASON_LENGTH,
+    RAIN_THRESHOLD,
+    TARGET_COL,
+    DATE_COL,
 )
 
 from .benchmark import (
@@ -58,6 +64,12 @@ __all__ = [
     'get_default_contract',
     'save_modeling_contract',
     'load_modeling_contract',
+    'FORECAST_HORIZON',
+    'CONTEXT_LENGTH',
+    'SEASON_LENGTH',
+    'RAIN_THRESHOLD',
+    'TARGET_COL',
+    'DATE_COL',
     # Benchmarks
     'UnifiedBenchmark',
     'UnifiedBenchmarkRunner',
