@@ -106,15 +106,17 @@ class TemporalStructureAnalyzer:
                               seasonal_results: Dict[str, Any],
                               figsize: Tuple[int, int] = (16, 10),
                               color_scheme: str = 'default',
-                              show_grid: bool = True) -> None:
+                              show_grid: bool = True,
+                              return_fig: bool = True) -> Optional[plt.Figure]:
         """
-        ✅ PURE VISUALIZATION: Plot seasonal patterns (NO ANALYSIS)
+        Plot seasonal patterns across monthly, daily, and yearly dimensions.
         
         Args:
             seasonal_results: Results from analyze_seasonal_patterns()
             figsize: Figure size
             color_scheme: Color scheme to use
             show_grid: Whether to show grid
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
         """
         fig, axes = plt.subplots(2, 2, figsize=figsize)
         fig.suptitle('Seasonal Patterns Analysis', fontsize=16, fontweight='bold')
@@ -158,16 +160,11 @@ class TemporalStructureAnalyzer:
             if show_grid:
                 axes[1,1].grid(True, alpha=0.3)
 
-        plt.tight_layout()
-        plt.show()
-
-        # Print insights
-        if 'monthly' in seasonal_results:
-            wet_months = seasonal_results['monthly']['wet_months']
-            dry_months = seasonal_results['monthly']['dry_months']
-            threshold = seasonal_results['monthly']['threshold_used']
-            print(f"🌧️ Wet Season (>{threshold*100:.0f}th percentile): {wet_months}")
-            print(f"☀️ Dry Season (<{(1-threshold)*100:.0f}th percentile): {dry_months}")
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
     # =============================================================================
     # PAIR 2: FFT FREQUENCY ANALYSIS - PURE SEPARATION ✅
@@ -179,10 +176,25 @@ class TemporalStructureAnalyzer:
                    period_range: Tuple[int, int] = (7, 730),
                    return_n_dominant: int = 10) -> Dict[str, Any]:
         """
-        ✅ ENHANCED ANALYSIS: FFT-based frequency analysis with parameterized dominant periods
+        FFT-based frequency analysis with parameterized dominant periods.
+        
+        .. note:: Detrending Methodology & Detected Periods (Technical Note)
+        
+           The parameter ``detrend_window=30`` subtracts a 30-day centered moving
+           average from the series (``target_ts - target_ts.rolling(30, center=True).mean()``).
+           This operation acts as a high-pass filter with sinc-like frequency response
+           that strongly attenuates periodic signals of duration >= 30 days.
+           Consequently, FFT peaks identified by this specific method are confined
+           to intra-monthly variations (< 30 days, e.g. [27, 21, 20, 19, 17, 9] days).
+           
+           In contrast:
+           - Domain periods [7, 30, 122, 365] are fixed candidate periods configured for
+             downstream modeling.
+           - Wavelet analysis uses raw data without this 30d moving average
+             subtraction, allowing it to preserve longer periodic structures (~175-182 days).
         
         Args:
-            detrend_window: Window size for trend removal
+            detrend_window: Window size for trend removal (centered moving average)
             top_n: Number of top periods to find during analysis
             period_range: Valid period range (min_days, max_days)
             return_n_dominant: Number of dominant periods to return for visualization
@@ -261,9 +273,10 @@ class TemporalStructureAnalyzer:
                      show_dominant: bool = True,
                      max_period: int = 365,
                      log_scale: bool = True,
-                     bar_chart_periods: Optional[int] = None) -> None:
+                     bar_chart_periods: Optional[int] = None,
+                     return_fig: bool = True) -> Optional[plt.Figure]:
         """
-        ✅ ENHANCED VISUALIZATION: Plot frequency spectrum with flexible dominant periods display
+        Plot frequency spectrum with flexible dominant periods display.
         
         Args:
             fft_results: Results from analyze_fft()
@@ -272,13 +285,14 @@ class TemporalStructureAnalyzer:
             max_period: Maximum period to show
             log_scale: Whether to use log scale for power
             bar_chart_periods: Number of periods to show in bar chart (None = use all from results)
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
         """
         if not fft_results['success']:
             print("❌ Cannot plot spectrum: FFT analysis failed")
-            return
+            return None
 
         fig, axes = plt.subplots(1, 2, figsize=figsize)
-        fig.suptitle('Enhanced Frequency Domain Analysis', fontsize=16, fontweight='bold')
+        fig.suptitle('Frequency Domain Analysis (FFT Spectrum)', fontsize=16, fontweight='bold')
 
         periods = fft_results['all_periods']
         magnitudes = fft_results['magnitudes']
@@ -291,8 +305,6 @@ class TemporalStructureAnalyzer:
         else:
             periods_to_show = dominant_periods[:bar_chart_periods]
             n_periods = min(bar_chart_periods, len(dominant_periods))
-
-        print(f"   📊 Displaying {n_periods} dominant periods in bar chart")
 
         # Filter by max_period
         valid_idx = periods <= max_period
@@ -354,8 +366,11 @@ class TemporalStructureAnalyzer:
                            f'{period}',
                            ha='center', va='bottom', fontsize=8, fontweight='bold')
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
     # =============================================================================
     # PAIR 3: MSTL DECOMPOSITION - PURE SEPARATION ✅
     # =============================================================================
@@ -542,19 +557,21 @@ class TemporalStructureAnalyzer:
                           mstl_results: Dict[str, Any],
                           figsize: Tuple[int, int] = (15, 12),
                           show_components: List[str] = ['trend', 'seasonal', 'resid'],
-                          original_scale: bool = True) -> None:
+                          original_scale: bool = True,
+                          return_fig: bool = True) -> Optional[plt.Figure]:
         """
-        ✅ ENHANCED VISUALIZATION: Handles log1p and Box-Cox transformations
+        Plot MSTL decomposition results (trend, seasonal, residual).
         
         Args:
             mstl_results: Results from decompose_mstl()
             figsize: Figure size
             show_components: Components to show
             original_scale: Whether to convert back to original scale
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
         """
         if not mstl_results['success']:
             print("❌ Cannot plot decomposition: MSTL failed")
-            return
+            return None
 
         transform_method = mstl_results.get('transform_method', 'unknown')
         n_plots = 1 + len(show_components)  # Original + components
@@ -563,7 +580,7 @@ class TemporalStructureAnalyzer:
         if n_plots == 1:
             axes = [axes]
 
-        fig.suptitle(f'MSTL Decomposition Results ({transform_method})', 
+        fig.suptitle(f'MSTL Multi-Seasonal Decomposition ({transform_method})', 
                     fontsize=16, fontweight='bold')
 
         plot_idx = 0
@@ -571,17 +588,14 @@ class TemporalStructureAnalyzer:
         # Original series
         original_data = mstl_results['original_ts']
         if original_scale and transform_method == 'log1p':
-            # For log1p, we can show both scales
             axes[plot_idx].plot(original_data.index, original_data.values, 'b-', linewidth=1)
             axes[plot_idx].set_title('Original Data (Original Scale)')
             axes[plot_idx].set_ylabel('Precipitation (mm)')
         elif original_scale and 'box_cox' in transform_method:
-            # For Box-Cox, show original scale
             axes[plot_idx].plot(original_data.index, original_data.values, 'b-', linewidth=1)
             axes[plot_idx].set_title('Original Data (Original Scale)')
             axes[plot_idx].set_ylabel('Precipitation (mm)')
         else:
-            # Show transformed scale
             transformed_data = mstl_results['transformed_ts']
             axes[plot_idx].plot(transformed_data.index, transformed_data.values, 'b-', linewidth=1)
             axes[plot_idx].set_title(f'Original Data ({transform_method} scale)')
@@ -613,16 +627,16 @@ class TemporalStructureAnalyzer:
             resid = mstl_results['resid']
             axes[plot_idx].plot(resid.index, resid.values, 'purple', linewidth=1, alpha=0.7)
             axes[plot_idx].axhline(y=0, color='black', linestyle='--', alpha=0.5)
-            axes[plot_idx].set_title('Residual Component (→ Stationarity Analysis)')
+            axes[plot_idx].set_title('Residual Component (Stationarity Diagnostics Input)')
             axes[plot_idx].set_ylabel(f'{transform_method} Residual')
             axes[plot_idx].grid(True, alpha=0.3)
             axes[-1].set_xlabel('Date')
         
-        plt.tight_layout()
-        plt.show()
-
-        print(f"   📤 Residual component ready for Stationarity analysis")
-        print(f"   🔄 Transform method used: {transform_method}")
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
     # =============================================================================
     # PAIR 4: WAVELET ANALYSIS - PURE SEPARATION ✅
@@ -634,12 +648,24 @@ class TemporalStructureAnalyzer:
                        analysis_duration_years: int = 3,
                        period_range: Tuple[int, int] = (3, 365)) -> Dict[str, Any]:
         """
-        ✅ PURE ANALYSIS: Wavelet-based time-frequency analysis (NO VISUALIZATION)
+        Wavelet-based time-frequency analysis (Continuous Wavelet Transform).
+        
+        .. note:: Wavelet Methodology & Detected Periods (Technical Note)
+        
+           Unlike FFT which is computed on the entire training series with a
+           30-day centered moving average detrending (attenuating signals >= 30d),
+           Wavelet analysis:
+           1. Operates on the most recent ``analysis_duration_years`` (default 3 years)
+              to capture localized, non-stationary time-frequency features.
+           2. Uses raw precipitation without 30-day moving average detrending,
+              allowing the Morlet wavelet to detect longer periodic structures such as
+              ~175-182 days.
+           3. Tracks how spectral power evolves across time in the scalogram.
         
         Args:
             wavelet_name: Wavelet to use ('morl', 'cmor', 'gaus')
             scales: Custom scales array (if None, auto-generated)
-            analysis_duration_years: Years of recent data to analyze
+            analysis_duration_years: Years of recent data to analyze (default 3)
             period_range: Period range for scale generation (min_days, max_days)
             
         Returns:
@@ -803,9 +829,10 @@ class TemporalStructureAnalyzer:
                       figsize: Tuple[int, int] = (15, 10),
                       cmap: str = 'jet',
                       show_coi: bool = True,
-                      log_scale: bool = True) -> None:
+                      log_scale: bool = True,
+                      return_fig: bool = True) -> Optional[plt.Figure]:
         """
-        ✅ PURE VISUALIZATION: Plot wavelet scalogram (NO ANALYSIS)
+        Plot wavelet scalogram (time-frequency power spectrum) and global spectrum.
         
         Args:
             wavelet_results: Results from analyze_wavelet()
@@ -813,10 +840,11 @@ class TemporalStructureAnalyzer:
             cmap: Colormap for scalogram
             show_coi: Whether to show cone of influence
             log_scale: Whether to use log scale for power
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
         """
         if not wavelet_results['success']:
             print("❌ Cannot plot scalogram: Wavelet analysis failed")
-            return
+            return None
 
         power = wavelet_results['power']
         periods = wavelet_results['periods']
@@ -825,7 +853,7 @@ class TemporalStructureAnalyzer:
         params = wavelet_results['parameters']
 
         fig, axes = plt.subplots(3, 1, figsize=figsize)
-        fig.suptitle(f'Wavelet Analysis - {params["wavelet_name"]} Wavelet', 
+        fig.suptitle(f'Wavelet Time-Frequency Analysis ({params["wavelet_name"]} Wavelet)', 
                     fontsize=16, fontweight='bold')
 
         # 1. Original time series
@@ -896,8 +924,11 @@ class TemporalStructureAnalyzer:
         axes[0].set_xticklabels([dates[i].strftime('%Y-%m') for i in tick_indices], 
                                rotation=45)
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
         # Print analysis summary
         print(f"\n🌊 Wavelet Analysis Summary:")
@@ -959,15 +990,47 @@ class TemporalStructureAnalyzer:
         # Combine all results
         results = {
             'seasonal_patterns': seasonal_results,
+            'seasonal': seasonal_results,
             'frequency_analysis': fft_results,
+            'fft': fft_results,
             'mstl_decomposition': mstl_results,  # ✅ Contains residual for Stationarity
+            'mstl': mstl_results,
             'wavelet_analysis': wavelet_results,
+            'wavelet': wavelet_results,
             'component_name': 'TemporalStructureAnalyzer_4Pairs_NoResidualAnalysis'
         }
 
         print(f"\n✅ TEMPORAL ANALYSIS COMPLETED - 4 PAIRS IMPLEMENTED")
         print(f"   📤 MSTL residual ready for Stationarity analysis")
         return results
+
+    def analyze(self) -> Dict[str, Any]:
+        """Run complete temporal structure analysis suite (standard analyzer protocol)."""
+        return self.analyze_all()
+
+    def plot_mstl_decomposition(self, mstl_results: Optional[Dict[str, Any]] = None,
+                                figsize: Tuple[int, int] = (15, 12),
+                                return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot MSTL multi-seasonal decomposition."""
+        if mstl_results is None:
+            mstl_results = self.decompose_mstl([7, 30, 365])
+        return self.plot_decomposition(mstl_results, figsize=figsize, return_fig=return_fig)
+
+    def plot_wavelet_scalogram(self, wavelet_results: Optional[Dict[str, Any]] = None,
+                               figsize: Tuple[int, int] = (15, 10),
+                               return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot Wavelet scalogram (time-frequency spectrum)."""
+        if wavelet_results is None:
+            wavelet_results = self.analyze_wavelet()
+        return self.plot_scalogram(wavelet_results, figsize=figsize, return_fig=return_fig)
+
+    def plot_fft_spectrum(self, fft_results: Optional[Dict[str, Any]] = None,
+                          figsize: Tuple[int, int] = (15, 8),
+                          return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot FFT frequency spectrum."""
+        if fft_results is None:
+            fft_results = self.analyze_fft()
+        return self.plot_spectrum(fft_results, figsize=figsize, return_fig=return_fig)
 
     def visualize_all(self, results: Dict[str, Any]) -> None:
         """

@@ -485,4 +485,41 @@ def build_neural_adapter_from_eda(
     """
     from ..models.nixtla import NeuralForecastAdapter, get_default_neural_models
     chosen_models = models if models is not None else get_default_neural_models(eda_report, horizon=horizon)
+    return NeuralForecastAdapter(models=chosen_models, horizon=horizon, **kwargs)
+
+
+def build_ml_direct_adapter_from_eda(
+    eda_report: Optional[Any] = None,
+    models: Optional[List[Any]] = None,
+    max_horizon: int = 7,
+    **kwargs,
+) -> "MLForecastAdapter":
+    """Build MLForecastAdapter with ML Direct models (standard loss, no Tweedie)."""
+    from ..models.nixtla import MLForecastAdapter, get_ml_direct_models
+    chosen_models = models if models is not None else get_ml_direct_models(eda_report)
+    return MLForecastAdapter(models=chosen_models, max_horizon=max_horizon, **kwargs)
+
+
+def build_ml_tweedie_adapter_from_eda(
+    eda_report: Optional[Any] = None,
+    models: Optional[List[Any]] = None,
+    max_horizon: int = 7,
+    **kwargs,
+) -> "MLForecastAdapter":
+    """Build MLForecastAdapter with ML Tweedie models (Compound Poisson-Gamma)."""
+    from ..models.nixtla import MLForecastAdapter, get_ml_tweedie_models
+    chosen_models = models if models is not None else get_ml_tweedie_models(eda_report)
+    return MLForecastAdapter(models=chosen_models, max_horizon=max_horizon, **kwargs)
+
+
+def build_neural_direct_adapter_from_eda(
+    eda_report: Optional[Any] = None,
+    models: Optional[List[Any]] = None,
+    horizon: int = 7,
+    max_steps: int = 100,
+    **kwargs,
+) -> "NeuralForecastAdapter":
+    """Build NeuralForecastAdapter with Neural Direct models (MAE loss, no Tweedie)."""
+    from ..models.nixtla import NeuralForecastAdapter, get_neural_direct_models
+    chosen_models = models if models is not None else get_neural_direct_models(horizon=horizon, max_steps=max_steps, eda_report=eda_report)
     return NeuralForecastAdapter(models=chosen_models, horizon=horizon, **kwargs)

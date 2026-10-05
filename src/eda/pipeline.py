@@ -36,33 +36,37 @@ logger = logging.getLogger(__name__)
 class EDAReport:
     """Structured output from EDAPipeline.run().
 
-    Contains the specific values that downstream steps (FeatureBuilder,
-    model constructors, RecursiveForecaster) actually consume.  Raw
-    analyzer outputs are stored in ``raw_results`` for the report/notebook.
+    Contains pure numerical values that downstream steps (FeatureBuilder,
+    model constructors, RecursiveForecaster) consume. Raw analyzer outputs
+    are stored in ``raw_results`` for notebooks/audit.
     """
 
     suggested_sarima_order: Tuple[int, int, int] = (2, 1, 2)
     suggested_seasonal_order: Optional[Tuple[int, int, int, int]] = (1, 1, 1, 7)
     vif_filtered_features: List[str] = field(default_factory=list)
-    validated_rain_threshold: float = 0.1
+    validated_rain_threshold: float = 0.0
     wet_season_months: List[int] = field(default_factory=list)
     representative_periods: List[int] = field(default_factory=list)
     high_skew_features: List[str] = field(default_factory=list)
     extreme_event_thresholds: Dict[str, float] = field(default_factory=dict)
-    rain_threshold_justification: str = ""
-    # Intermittency (Syntetos-Boylan) — P4
-    intermittency_classification: str = ""   # SMOOTH/ERRATIC/INTERMITTENT/LUMPY
-    intermittency_model_rec: str = ""
+    # Intermittency (Syntetos-Boylan) pure numerical statistics
     intermittency_adi: Optional[float] = None
     intermittency_cv2: Optional[float] = None
+    # Optional diagnostic labels strictly isolated from core numerical fields
+    diagnostic_labels_optional: Dict[str, str] = field(default_factory=dict)
     raw_results: Dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self, include_raw: bool = False) -> Dict[str, Any]:
-        """Convert EDAReport to dictionary.
+    @property
+    def intermittency_classification(self) -> str:
+        """Optional label for backward compatibility; read from diagnostic_labels_optional."""
+        return self.diagnostic_labels_optional.get("intermittency_classification", "")
+
+    def to_dict(self, include_raw: bool = False, include_diagnostics: bool = False) -> Dict[str, Any]:
+        """Convert EDAReport to dictionary containing pure numerical configurations.
 
         Args:
-            include_raw: If True, include raw_results dictionary. If False,
-                only return JSON-serializable core configuration fields.
+            include_raw: If True, include raw_results dictionary.
+            include_diagnostics: If True, include diagnostic_labels_optional dictionary.
         """
         d: Dict[str, Any] = {
             "suggested_sarima_order": list(self.suggested_sarima_order),
@@ -73,12 +77,11 @@ class EDAReport:
             "representative_periods": [int(p) for p in self.representative_periods],
             "high_skew_features": list(self.high_skew_features),
             "extreme_event_thresholds": {k: float(v) for k, v in self.extreme_event_thresholds.items()},
-            "rain_threshold_justification": str(self.rain_threshold_justification),
-            "intermittency_classification": str(self.intermittency_classification),
-            "intermittency_model_rec": str(self.intermittency_model_rec),
             "intermittency_adi": float(self.intermittency_adi) if self.intermittency_adi is not None else None,
             "intermittency_cv2": float(self.intermittency_cv2) if self.intermittency_cv2 is not None else None,
         }
+        if include_diagnostics and self.diagnostic_labels_optional:
+            d["diagnostic_labels_optional"] = dict(self.diagnostic_labels_optional)
         if include_raw:
             d["raw_results"] = self.raw_results
         return d
@@ -91,29 +94,32 @@ class EDAReport:
         if seasonal_order is not None:
             seasonal_order = tuple(seasonal_order)
 
+        diag_labels = dict(data.get("diagnostic_labels_optional", {}))
+        # Support reading legacy JSON files that might have flat fields
+        if "intermittency_classification" in data and "intermittency_classification" not in diag_labels:
+            diag_labels["intermittency_classification"] = data["intermittency_classification"]
+
         return cls(
             suggested_sarima_order=sarima_order,
             suggested_seasonal_order=seasonal_order,
             vif_filtered_features=data.get("vif_filtered_features", []),
-            validated_rain_threshold=float(data.get("validated_rain_threshold", 0.1)),
+            validated_rain_threshold=float(data.get("validated_rain_threshold", 0.0)),
             wet_season_months=[int(m) for m in data.get("wet_season_months", [])],
             representative_periods=[int(p) for p in data.get("representative_periods", [])],
             high_skew_features=data.get("high_skew_features", []),
             extreme_event_thresholds={k: float(v) for k, v in data.get("extreme_event_thresholds", {}).items()},
-            rain_threshold_justification=data.get("rain_threshold_justification", ""),
-            intermittency_classification=data.get("intermittency_classification", ""),
-            intermittency_model_rec=data.get("intermittency_model_rec", ""),
             intermittency_adi=data.get("intermittency_adi"),
             intermittency_cv2=data.get("intermittency_cv2"),
+            diagnostic_labels_optional=diag_labels,
             raw_results=data.get("raw_results", {}),
         )
 
-    def to_json(self, filepath: Union[str, Path]) -> None:
+    def to_json(self, filepath: Union[str, Path], include_diagnostics: bool = False) -> None:
         """Save JSON-serializable report configuration to a JSON file."""
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(include_raw=False), f, indent=2, ensure_ascii=False)
+            json.dump(self.to_dict(include_raw=False, include_diagnostics=include_diagnostics), f, indent=2, ensure_ascii=False)
         logger.info("Saved EDAReport to %s", path)
 
     @classmethod
@@ -132,9 +138,9 @@ class EDAReport:
         temporal: Dict[str, Any],
         stationarity: Dict[str, Any],
         extreme: Dict[str, Any],
-        validated_threshold: float = 0.1,
-        threshold_justification: str = "",
+        validated_threshold: float = 0.0,
         representative_periods: Optional[List[int]] = None,
+        diagnostic_labels: Optional[Dict[str, str]] = None,
     ) -> "EDAReport":
         """Build an EDAReport from the raw outputs of the five analyzers."""
 
@@ -172,8 +178,8 @@ class EDAReport:
         # --- Representative periods ---
         periods: List[int] = representative_periods or []
         if not periods and temporal:
-            fft_res = temporal.get('fft', {})
-            detected = fft_res.get('detected_periods', [])
+            fft_res = temporal.get('fft', temporal.get('frequency_analysis', {}))
+            detected = fft_res.get('detected_periods', fft_res.get('dominant_periods', []))
             if detected:
                 periods = [int(p) for p in detected[:5]]
 
@@ -187,7 +193,7 @@ class EDAReport:
         # --- Extreme event thresholds ---
         extreme_thresholds: Dict[str, float] = {}
         if extreme:
-            thresholds = extreme.get('thresholds', {})
+            thresholds = extreme.get('thresholds', extreme.get('extreme_definition', {}).get('thresholds', {}))
             if thresholds:
                 extreme_thresholds = {
                     k: float(v) for k, v in thresholds.items()
@@ -199,20 +205,22 @@ class EDAReport:
         if distribution:
             intermittency = distribution.get('intermittency', {})
 
+        diag_labels = dict(diagnostic_labels or {})
+        if 'classification' in intermittency and 'intermittency_classification' not in diag_labels:
+            diag_labels['intermittency_classification'] = intermittency['classification']
+
         return cls(
             suggested_sarima_order=sarima_order,
             suggested_seasonal_order=seasonal_order,
             vif_filtered_features=vif_features,
-            validated_rain_threshold=validated_threshold,
+            validated_rain_threshold=float(validated_threshold),
             wet_season_months=wet_months,
             representative_periods=periods,
             high_skew_features=high_skew,
             extreme_event_thresholds=extreme_thresholds,
-            rain_threshold_justification=threshold_justification,
-            intermittency_classification=intermittency.get('classification', ''),
-            intermittency_model_rec=intermittency.get('model_recommendation', ''),
             intermittency_adi=intermittency.get('adi'),
             intermittency_cv2=intermittency.get('cv2'),
+            diagnostic_labels_optional=diag_labels,
             raw_results={
                 'distribution': distribution,
                 'correlation': correlation,
@@ -221,6 +229,62 @@ class EDAReport:
                 'extreme': extreme,
             },
         )
+
+
+# ======================================================================
+# Rain Threshold Comparison Helper
+# ======================================================================
+
+def compare_rain_thresholds(
+    df: pd.DataFrame,
+    target_col: Optional[str] = None,
+    candidate_thresholds: Optional[List[float]] = None,
+) -> pd.DataFrame:
+    """Compute empirical distribution statistics across candidate rain thresholds.
+
+    Returns a DataFrame comparing threshold values, counts, cumulative percentages,
+    and incremental percentage gaps. Does NOT pick a default threshold or prescribe conclusions.
+
+    Args:
+        df: DataFrame containing the target variable.
+        target_col: Target column name.
+        candidate_thresholds: List of thresholds in mm (default [0.0, 0.1, 0.6, 1.0]).
+
+    Returns:
+        pd.DataFrame with columns ['threshold_mm', 'condition', 'days_count', 'pct_of_total', 'incremental_gap_pct']
+    """
+    col = resolve_target_col(target_col)
+    target = df[col].dropna()
+    total_days = len(target)
+
+    if candidate_thresholds is None:
+        candidate_thresholds = [0.0, 0.1, 0.6, 1.0]
+
+    candidate_thresholds = sorted(list(candidate_thresholds))
+    records = []
+    prev_frac = None
+    for th in candidate_thresholds:
+        if th == 0.0:
+            count = int((target == 0.0).sum())
+            frac = float(count / total_days) if total_days > 0 else 0.0
+            gap_pct = 0.0
+            cond_desc = "Exactly 0.0 mm"
+        else:
+            count = int((target < th).sum())
+            frac = float(count / total_days) if total_days > 0 else 0.0
+            gap_pct = (frac - prev_frac) if prev_frac is not None else frac
+            cond_desc = f"< {th:.1f} mm"
+
+        records.append({
+            "threshold_mm": th,
+            "condition": cond_desc,
+            "days_count": count,
+            "pct_of_total": round(frac * 100, 2),
+            "incremental_gap_pct": round(gap_pct * 100, 2) if th != 0.0 else 0.0,
+        })
+        prev_frac = frac
+
+    return pd.DataFrame(records)
 
 
 # ======================================================================
@@ -236,24 +300,20 @@ class EDAPipeline:
         report = pipeline.run()
         # report.suggested_sarima_order, report.vif_filtered_features, etc.
 
+    Can also receive precomputed results from individual analyzers:
+        report = pipeline.run(distribution=dist_res, correlation=corr_res, ...)
+
     Period selection
     ~~~~~~~~~~~~~~~~
     ``representative_periods`` control MSTL decomposition and SARIMA
     seasonal-order suggestion.  Two strategies:
 
-    - ``'domain'`` (default): Use fixed, climatologically-motivated periods.
-      Default ``[7, 30, 122, 365]`` covers weekly cycle, MJO (~30d),
-      monsoon onset (~122d), and annual cycle.  This is what the notebook
-      currently uses (DS.ipynb Cell[26]: ``analysis_periods = [7, 20, 122, 365]``).
+    - ``'domain'`` (default): Use fixed periods.
+      Default ``[7, 30, 122, 365]`` covers candidate weekly (7d), monthly (30d),
+      seasonal (~122d), and annual (365d) cycles.
     - ``'fft'``: Use FFT-detected top-N periods from
       ``TemporalStructureAnalyzer.analyze_all()`` — data-driven, but
       rainfall FFT spectra are noisy and may capture spurious peaks.
-
-    When ``period_selection='fft'``, the ``representative_periods`` fed to
-    ``StationarityAutocorrelationAnalyzer`` come from FFT, not domain
-    knowledge — despite the field being labelled 'theory-driven' in
-    ``Stationarity.py``.  This is a known naming inconsistency documented
-    here for transparency.
     """
 
     def __init__(
@@ -280,36 +340,78 @@ class EDAPipeline:
         self.period_selection = period_selection
         self.domain_periods = domain_periods or [7, 30, 122, 365]
 
-    def run(self) -> EDAReport:
-        """Execute all analyzers and produce a structured EDAReport."""
+    def run(
+        self,
+        distribution: Optional[Dict[str, Any]] = None,
+        correlation: Optional[Dict[str, Any]] = None,
+        temporal: Optional[Dict[str, Any]] = None,
+        stationarity: Optional[Dict[str, Any]] = None,
+        extreme: Optional[Dict[str, Any]] = None,
+        validated_threshold: Optional[float] = None,
+    ) -> EDAReport:
+        """Execute all analyzers (or reuse precomputed) and produce a structured EDAReport.
+
+        Args:
+            distribution: Precomputed DistributionAnalyzer results (optional).
+            correlation: Precomputed CorrelationAnalyzer results (optional).
+            temporal: Precomputed TemporalStructureAnalyzer results (optional).
+            stationarity: Precomputed StationarityAutocorrelationAnalyzer results (optional).
+            extreme: Precomputed ExtremeEventsAnalyzer results (optional).
+            validated_threshold: Operational rain threshold (default 0.0). Set explicitly
+                by the user based on empirical comparison table (compare_rain_thresholds).
+        """
         print("=" * 70)
-        print("🔬 EDAPipeline: running all 5 analyzers in dependency order")
+        print("🔬 EDAPipeline: aggregating EDA results into structured EDAReport")
         print("=" * 70)
 
         # ---- 1. Distribution ----
-        print("\n📊 [1/5] DistributionAnalyzer")
-        distribution_results = self._run_distribution()
+        if distribution is not None:
+            print("\n📊 [1/5] DistributionAnalyzer (reusing precomputed results)")
+            distribution_results = distribution
+        else:
+            print("\n📊 [1/5] DistributionAnalyzer")
+            distribution_results = self._run_distribution()
 
         # ---- 2. Correlation ----
-        print("\n📊 [2/5] CorrelationAnalyzer")
-        correlation_results = self._run_correlation()
+        if correlation is not None:
+            print("\n📊 [2/5] CorrelationAnalyzer (reusing precomputed results)")
+            correlation_results = correlation
+        else:
+            print("\n📊 [2/5] CorrelationAnalyzer")
+            correlation_results = self._run_correlation()
 
         # ---- 3. Temporal (produces mstl_results for step 4) ----
-        print("\n📊 [3/5] TemporalStructureAnalyzer")
-        temporal_results = self._run_temporal()
+        if temporal is not None:
+            print("\n📊 [3/5] TemporalStructureAnalyzer (reusing precomputed results)")
+            temporal_results = temporal
+        else:
+            print("\n📊 [3/5] TemporalStructureAnalyzer")
+            temporal_results = self._run_temporal()
 
         # ---- 4. Stationarity (depends on temporal.mstl_results) ----
-        print("\n📊 [4/5] StationarityAutocorrelationAnalyzer")
-        stationarity_results = self._run_stationarity(temporal_results)
+        if stationarity is not None:
+            print("\n📊 [4/5] StationarityAutocorrelationAnalyzer (reusing precomputed results)")
+            stationarity_results = stationarity
+        else:
+            print("\n📊 [4/5] StationarityAutocorrelationAnalyzer")
+            stationarity_results = self._run_stationarity(temporal_results)
 
         # ---- 5. Extreme Events ----
-        print("\n📊 [5/5] ExtremeEventsAnalyzer")
-        extreme_results = self._run_extreme()
+        if extreme is not None:
+            print("\n📊 [5/5] ExtremeEventsAnalyzer (reusing precomputed results)")
+            extreme_results = extreme
+        else:
+            print("\n📊 [5/5] ExtremeEventsAnalyzer")
+            extreme_results = self._run_extreme()
 
-        # ---- Validate rain threshold ----
-        threshold, justification = self._validate_rain_threshold(
-            distribution_results
-        )
+        # ---- Operational rain threshold ----
+        # Do NOT auto-compute or auto-assign a threshold.
+        # User explicitly configures validated_threshold based on empirical comparison table.
+        threshold = float(validated_threshold) if validated_threshold is not None else 0.0
+        if validated_threshold is not None:
+            print(f"\n🌧️ Operational rain threshold: {threshold} mm (user-specified)")
+        else:
+            print("\n🌧️ Operational rain threshold: not specified (0.0 mm default; user should set explicitly)")
 
         # Determine representative periods for report
         if self.period_selection == 'domain':
@@ -329,7 +431,6 @@ class EDAPipeline:
             stationarity=stationarity_results,
             extreme=extreme_results,
             validated_threshold=threshold,
-            threshold_justification=justification,
             representative_periods=periods,
         )
 
@@ -337,14 +438,12 @@ class EDAPipeline:
         print("✅ EDAPipeline complete — EDAReport ready")
         print(f"   SARIMA order: {report.suggested_sarima_order}")
         print(f"   Seasonal order: {report.suggested_seasonal_order}")
-        print(f"   Rain threshold: {report.validated_rain_threshold} mm "
-              f"({report.rain_threshold_justification})")
+        print(f"   Rain threshold: {report.validated_rain_threshold} mm")
         print(f"   VIF-filtered features: {len(report.vif_filtered_features)}")
         print(f"   Wet season months: {report.wet_season_months}")
-        if report.intermittency_classification:
-            print(f"   Intermittency: {report.intermittency_classification} "
-                  f"(ADI={report.intermittency_adi:.2f}, "
-                  f"CV²={report.intermittency_cv2:.2f})")
+        if report.intermittency_adi is not None and report.intermittency_cv2 is not None:
+            print(f"   Intermittency stats: ADI={report.intermittency_adi:.2f}, "
+                  f"CV²={report.intermittency_cv2:.2f}")
         print("=" * 70)
 
         return report
@@ -445,61 +544,3 @@ class EDAPipeline:
             print(f"   ⚠️ ExtremeEventsAnalyzer failed: {e}")
             return {}
 
-    # ------------------------------------------------------------------
-    # Rain threshold validation
-    # ------------------------------------------------------------------
-
-    def _validate_rain_threshold(
-        self,
-        distribution_results: Dict[str, Any],
-    ) -> Tuple[float, str]:
-        """Validate the rain/no-rain threshold against the real distribution.
-
-        Checks where common meteorological thresholds (0.1mm, 0.6mm, 1mm)
-        fall relative to the empirical distribution and picks the one that
-        best separates rain from no-rain.
-        """
-        target = self.df[self.target_col].dropna()
-
-        # Fraction of days at various thresholds
-        frac_zero = (target == 0).mean()
-        frac_below_01 = (target < 0.1).mean()
-        frac_below_06 = (target < 0.6).mean()
-        frac_below_1 = (target < 1.0).mean()
-
-        print(f"   🌧️ Rain threshold validation:")
-        print(f"      Exactly 0 mm: {frac_zero:.1%}")
-        print(f"      < 0.1 mm:     {frac_below_01:.1%}")
-        print(f"      < 0.6 mm:     {frac_below_06:.1%}")
-        print(f"      < 1.0 mm:     {frac_below_1:.1%}")
-
-        # Heuristic: pick the threshold that creates the clearest gap
-        # between "no rain" and "rain" categories
-        gap_01 = frac_below_01 - frac_zero  # days in (0, 0.1)
-        gap_06 = frac_below_06 - frac_below_01  # days in [0.1, 0.6)
-        gap_1 = frac_below_1 - frac_below_06  # days in [0.6, 1.0)
-
-        # If very few days fall in (0, 0.1), then 0.1mm is a good threshold
-        # (tight gap means most zero-rain days are exactly 0)
-        if gap_01 < 0.02:
-            threshold = 0.1
-            justification = (
-                f"0.1mm chosen — only {gap_01:.1%} of days fall in (0, 0.1mm), "
-                f"indicating a clean separation at this threshold"
-            )
-        elif gap_06 < 0.03:
-            threshold = 0.6
-            justification = (
-                f"0.6mm chosen (Vietnamese meteorological standard for 'trace rain') "
-                f"— {frac_below_06:.1%} of days are below this threshold"
-            )
-        else:
-            threshold = 0.1
-            justification = (
-                f"0.1mm used as default — no strong bimodal gap detected. "
-                f"Consider domain expert review."
-            )
-
-        print(f"      ➤ Validated threshold: {threshold} mm ({justification})")
-
-        return threshold, justification

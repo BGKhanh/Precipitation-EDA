@@ -23,6 +23,12 @@ from .nixtla import (
     get_default_stats_models,
     get_default_ml_models,
     get_default_neural_models,
+    get_statistical_models,
+    get_eda_arima_model,
+    get_ml_direct_models,
+    get_ml_tweedie_models,
+    get_ml_hurdle_models,
+    get_neural_direct_models,
 )
 
 # Legacy exports
@@ -75,6 +81,12 @@ __all__ = [
     'get_default_stats_models',
     'get_default_ml_models',
     'get_default_neural_models',
+    'get_statistical_models',
+    'get_eda_arima_model',
+    'get_ml_direct_models',
+    'get_ml_tweedie_models',
+    'get_ml_hurdle_models',
+    'get_neural_direct_models',
     # Legacy models
     'BaseRainfallModel',
     'BaseTimeSeriesModel',

@@ -195,16 +195,26 @@ cython_debug/
 .cursor
 
 
-Báo cáo Phân tích Khám phá Dữ liệu.docx
+# =============================================================================
+# EXCLUSIONS FOR RAW CODE ONLY REPO
+# =============================================================================
 
-.agents/**
+# Reports directory (all generated JSON, CSV reports & evaluation outputs)
+reports/**
 
-tasks/**
+# Office documents & texts
+*.docx
+*.doc
+EDA.txt
 
-scripts/**
+# Processed datasets and binary predictions
+data/processed/**
+*.npz
 
-scratch/**
-
-lightning_logs/**
-
+# Internal scripts, tests, scratch & specs (not pushed for now)
 tests/**
+scripts/**
+scratch/**
+tasks/**
+.agents/**
+lightning_logs/**

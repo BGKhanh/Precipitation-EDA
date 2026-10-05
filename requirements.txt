@@ -1,21 +1,21 @@
-# Core dependencies
-pandas>=2.2.3
-numpy>=1.26.4
-matplotlib>=3.9.2
-seaborn>=0.13.2
-scipy>=1.14.1
-scikit-learn>=1.5.2
-statsmodels>=0.14.4
-requests>=2.32.3
+pandas>=2.2.3,<3.0
+numpy>=1.26.4,<3.0
+matplotlib>=3.9.2,<4.0
+seaborn>=0.13.2,<0.14
+scipy>=1.14.1,<2.0
+scikit-learn>=1.5.2,<2.0
+statsmodels>=0.14.4,<0.16
+requests>=2.32.3,<3.0
 
-# Optional dependencies
-PyWavelets>=1.8.0
-optuna>=4.4.0
-ray[tune]
-xgboost>=3.0.2
-lightgbm>=4.6.0
 
-# Nixtla ecosystem (Step 5 — unified benchmark)
-statsforecast>=1.7.0
-utilsforecast>=0.1.0
-mlforecast>=1.5.2
+PyWavelets>=1.8.0,<2.0
+optuna>=4.4.0,<6.0
+ray[tune]>=2.58.0,<2.59.0
+xgboost>=3.0.2,<4.0
+lightgbm>=4.6.0,<5.0
+
+
+statsforecast>=1.7.0,<3.0
+utilsforecast>=0.2.16,<0.3
+mlforecast>=1.1.0,<1.2
+neuralforecast>=2.0.0,<4.0

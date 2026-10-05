@@ -147,9 +147,6 @@ class StationarityAutocorrelationAnalyzer:
         # Theory-driven SARIMA Suggestions
         sarima_suggestions = self._generate_theory_driven_sarima_suggestions(acf_results, pacf_results)
 
-        # Visualization with theory context
-        self._theory_driven_autocorrelation_visualization(target_ts, max_lags, "Original Series")
-
         return {
             'acf_results': acf_results,
             'pacf_results': pacf_results,
@@ -344,10 +341,11 @@ class StationarityAutocorrelationAnalyzer:
         
         return suggestions
 
-    def _theory_driven_autocorrelation_visualization(self, ts: pd.Series, max_lags: int, label: str) -> None:
+    def _theory_driven_autocorrelation_visualization(self, ts: pd.Series, max_lags: int,
+                                                     label: str, return_fig: bool = True) -> Optional[plt.Figure]:
         """ACF/PACF visualization with representative periods context"""
         fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-        fig.suptitle(f'Theory-Driven Autocorrelation Analysis - {label}', 
+        fig.suptitle(f'Autocorrelation Diagnostics (ACF & PACF) - {label}', 
                      fontsize=14, fontweight='bold')
 
         # Add periods information to plots
@@ -411,8 +409,11 @@ class StationarityAutocorrelationAnalyzer:
                 axes[1, 1].text(0.5, 0.5, 'PACF Diff Error', ha='center', va='center', 
                                transform=axes[1, 1].transAxes)
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
 
     def _comprehensive_synthesis(self, stationarity_results: Dict, 
@@ -454,7 +455,7 @@ class StationarityAutocorrelationAnalyzer:
             'model_recommendations': []
         }
 
-        # Model recommendations
+        # Model recommendations (stored for programmatic access, not auto-printed)
         if is_stationary:
             synthesis_report['model_recommendations'].append("ARMA models suitable")
         else:
@@ -485,7 +486,7 @@ class StationarityAutocorrelationAnalyzer:
         if theory_params.get('has_periods'):
             synthesis_report['model_recommendations'].append(f"Theory-driven analysis: {len(periods_validated_lags)} lags validated against representative periods")
 
-        # Print synthesis
+        # Print quantitative synthesis only (no prescriptive recommendation text)
         print(f"   📊 PHÁT HIỆN CHÍNH:")
         print(f"      🔹 Tính dừng: {stationarity_type}")
         print(f"      🔹 Cần sai phân: {'Có' if synthesis_report['differencing_needed'] else 'Không'}")
@@ -497,11 +498,17 @@ class StationarityAutocorrelationAnalyzer:
         if theory_params.get('has_periods'):
             print(f"      🎯 Representative periods: {theory_params['representative_periods']}")
 
-        print(f"\n   💡 THEORY-DRIVEN MODEL RECOMMENDATIONS:")
-        for rec in synthesis_report['model_recommendations']:
-            print(f"      • {rec}")
-
         return synthesis_report
+
+    @staticmethod
+    def get_model_recommendations(synthesis_report: Dict[str, Any]) -> List[str]:
+        """
+        Optional helper: inspect indicative model suggestions from synthesis results.
+        Note: Purely descriptive heuristic, not a mandatory pipeline decision.
+        """
+        if not synthesis_report:
+            return []
+        return synthesis_report.get('model_recommendations', [])
 
     def analyze(self) -> Dict[str, Any]:
         """        
@@ -562,9 +569,6 @@ class StationarityAutocorrelationAnalyzer:
 
         # Combined Assessment
         assessment = self._stationarity_assessment(adf_results, kpss_results)
-
-        # Visual Analysis
-        self._visual_stationarity_analysis(target_ts)
 
         return {
             'adf_test': adf_results,
@@ -646,8 +650,8 @@ class StationarityAutocorrelationAnalyzer:
             'kpss_agrees': kpss_stat
         }
 
-    def _visual_stationarity_analysis(self, target_ts: pd.Series) -> None:
-        """Visual stationarity analysis"""
+    def _visual_stationarity_analysis(self, target_ts: pd.Series, return_fig: bool = True) -> Optional[plt.Figure]:
+        """Visual stationarity analysis (rolling statistics and differencing)"""
         window = min(365, len(target_ts) // 4)
         rolling_mean = target_ts.rolling(window=window).mean()
         rolling_std = target_ts.rolling(window=window).std()
@@ -681,8 +685,11 @@ class StationarityAutocorrelationAnalyzer:
         axes[1, 1].legend()
         axes[1, 1].grid(True, alpha=0.3)
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
     # =============================================================================
     # RESIDUAL ANALYSIS METHODS (MIGRATED FROM TEMPORALANALYSIS)
@@ -705,13 +712,9 @@ class StationarityAutocorrelationAnalyzer:
         residual_analysis_results = self.diagnose_residuals(residual)
         
         if residual_analysis_results['success']:
-            # Vẽ biểu đồ từ kết quả
-            self.plot_residual_diagnostics(residual_analysis_results)
-            
             # Đánh giá chất lượng dựa trên kết quả có sẵn
             quality_assessment = self._assess_mstl_quality(residual_analysis_results)
             residual_analysis_results['quality_assessment'] = quality_assessment
-            
             
         return residual_analysis_results
 
@@ -825,17 +828,19 @@ class StationarityAutocorrelationAnalyzer:
                                  residual_results: Dict[str, Any],
                                  figsize: Tuple[int, int] = (15, 10),
                                  hist_bins: int = 50,
-                                 layout: str = '2x2') -> None:
+                                 layout: str = '2x2',
+                                 return_fig: bool = True) -> Optional[plt.Figure]:
         """
         Args:
             residual_results: Results from diagnose_residuals()
             figsize: Figure size
             hist_bins: Number of bins for histogram
             layout: Plot layout ('2x2', '3x2', '1x4')
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
         """
         if not residual_results['success']:
             print("❌ Cannot plot diagnostics: Residual analysis failed")
-            return
+            return None
 
         residuals = residual_results['residuals']
         acf_lags = residual_results['parameters']['acf_lags']
@@ -901,8 +906,11 @@ class StationarityAutocorrelationAnalyzer:
         for i in range(plot_idx, len(axes)):
             axes[i].set_visible(False)
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
         # Print diagnostic summary
         stats = residual_results['residual_stats']
@@ -978,15 +986,49 @@ class StationarityAutocorrelationAnalyzer:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
+    # --- Convenience Plotting Methods ---
+
+    def plot_stationarity_diagnostics(self, target_ts: Optional[pd.Series] = None,
+                                      return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot rolling statistics and first differencing stationarity diagnostics."""
+        if target_ts is None:
+            ts_data = self.df.set_index(self.date_col).sort_index()
+            target_ts = ts_data[self.target_col].dropna()
+        return self._visual_stationarity_analysis(target_ts, return_fig=return_fig)
+
+    def plot_autocorrelation(self, target_ts: Optional[pd.Series] = None,
+                             max_lags: Optional[int] = None,
+                             return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot ACF and PACF with representative period markers."""
+        if target_ts is None:
+            ts_data = self.df.set_index(self.date_col).sort_index()
+            target_ts = ts_data[self.target_col].dropna()
+        if max_lags is None:
+            max_lags = min(
+                self.theory_driven_params.get('max_lags_recommended', 100),
+                len(target_ts) // 4
+            )
+        return self._theory_driven_autocorrelation_visualization(target_ts, max_lags, "Original Series", return_fig=return_fig)
+
+    def plot_residual(self, residual_results: Optional[Dict[str, Any]] = None,
+                      return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot residual diagnostics."""
+        if residual_results is None:
+            if not self.mstl_results or 'resid' not in self.mstl_results:
+                print("⚠️ No MSTL results available for residual plot")
+                return None
+            residual = self.mstl_results['resid'].dropna()
+            residual_results = self.diagnose_residuals(residual)
+        return self.plot_residual_diagnostics(residual_results, return_fig=return_fig)
+
     def _residual_visualization(self, residual: pd.Series) -> None:
         """Legacy residual visualization wrapper"""
-        # Create a residual analysis result dict and call the new method
         residual_analysis = {
             'success': True,
             'residuals': residual,
             'parameters': {'acf_lags': 40}
         }
-        self.plot_residual_diagnostics(residual_analysis, layout='2x2')
+        self.plot_residual_diagnostics(residual_analysis, layout='2x2', return_fig=False)
 
 
 # =============================================================================
@@ -1013,3 +1055,7 @@ def analyze_stationarity_autocorrelation(df: pd.DataFrame,
     """
     analyzer = StationarityAutocorrelationAnalyzer(df, target_col, date_col, mstl_results, representative_periods)
     return analyzer.analyze()
+
+
+# Module-level alias for optional model recommendations helper
+get_model_recommendations = StationarityAutocorrelationAnalyzer.get_model_recommendations

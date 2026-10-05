@@ -68,6 +68,8 @@ class ExtremeEventsAnalyzer:
 
             # Combine results
             results = {
+                'thresholds': extreme_definition.get('thresholds', {}),
+                'extreme_counts': extreme_definition.get('extreme_counts', {}),
                 'extreme_definition': extreme_definition,
                 'seasonal_patterns': seasonal_patterns,
                 'component_name': 'ExtremeEventsAnalyzer_Refactored',
@@ -179,9 +181,6 @@ class ExtremeEventsAnalyzer:
             # Group by month
             extreme_by_month = extreme_events.groupby('Month').size()
 
-            # Create comprehensive visualization
-            self._create_extreme_events_visualization(extreme_events, p95, extreme_by_month)
-
             # Calculate return periods
             sorted_values = self.df[self.target_col].sort_values(ascending=False)
             return_periods = len(self.df) / (np.arange(1, len(sorted_values) + 1))
@@ -212,7 +211,8 @@ class ExtremeEventsAnalyzer:
     def _create_extreme_events_visualization(self, 
                                            extreme_events: pd.DataFrame,
                                            p95: float,
-                                           extreme_by_month: pd.Series) -> None:
+                                           extreme_by_month: pd.Series,
+                                           return_fig: bool = True) -> Optional[plt.Figure]:
         """
         Create comprehensive extreme events visualization
         
@@ -220,11 +220,12 @@ class ExtremeEventsAnalyzer:
             extreme_events: DataFrame containing extreme events
             p95: 95th percentile threshold
             extreme_by_month: Monthly extreme events count
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
         """
         try:
             # Create visualization
             fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-            fig.suptitle('Extreme Events Analysis', fontsize=16, fontweight='bold')
+            fig.suptitle('Extreme Events Diagnostic Analysis', fontsize=16, fontweight='bold')
 
             # 1. Monthly extreme events
             if len(extreme_by_month) > 0:
@@ -247,7 +248,6 @@ class ExtremeEventsAnalyzer:
                 axes[0, 1].set_xlabel('Date')
                 axes[0, 1].set_ylabel('Precipitation (mm)')
                 axes[0, 1].grid(True, alpha=0.3)
-                # Rotate x-axis labels for better readability
                 axes[0, 1].tick_params(axis='x', rotation=45)
             else:
                 axes[0, 1].text(0.5, 0.5, 'No extreme events to plot', 
@@ -273,7 +273,7 @@ class ExtremeEventsAnalyzer:
                 # Plot top 100 values
                 axes[1, 1].loglog(return_periods[:100], sorted_values.iloc[:100], 
                                  'bo-', markersize=4)
-                axes[1, 1].set_title('Return Period Analysis')
+                axes[1, 1].set_title('Empirical Return Period Analysis')
                 axes[1, 1].set_xlabel('Return Period (days)')
                 axes[1, 1].set_ylabel('Precipitation (mm)')
                 axes[1, 1].grid(True, alpha=0.3)
@@ -281,11 +281,32 @@ class ExtremeEventsAnalyzer:
                 axes[1, 1].text(0.5, 0.5, 'Insufficient data for return period analysis', 
                                ha='center', va='center', transform=axes[1, 1].transAxes)
 
-            plt.tight_layout()
-            plt.show()
+            fig.tight_layout()
+            if not return_fig:
+                plt.show()
+                return None
+            return fig
 
         except Exception as e:
             print(f"   ⚠️ Visualization error: {e}")
+            return None
+
+    def plot_extreme_events(self, return_fig: bool = True) -> Optional[plt.Figure]:
+        """
+        Plot 4-panel extreme event analysis (monthly counts, time series, distribution, return period).
+        
+        Args:
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
+        """
+        clean_data = self.df[self.target_col].dropna()
+        if len(clean_data) == 0:
+            print("⚠️ No valid data for extreme event plotting")
+            return None
+        p95 = clean_data.quantile(0.95)
+        extreme_mask = self.df[self.target_col] > p95
+        extreme_events = self.df[extreme_mask].copy()
+        extreme_by_month = extreme_events.groupby('Month').size()
+        return self._create_extreme_events_visualization(extreme_events, p95, extreme_by_month, return_fig=return_fig)
 
 
 # =============================================================================

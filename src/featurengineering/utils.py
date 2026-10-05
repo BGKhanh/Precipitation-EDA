@@ -2,12 +2,19 @@
 # FEATURE ENGINEERING UTILITY FUNCTIONS
 # =============================================================================
 
+import sys
 from typing import List, Dict, Any, Optional, Union
 import pandas as pd
 import numpy as np
 import warnings
 
 from ..config.constants import Config
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 warnings.filterwarnings('ignore')
 

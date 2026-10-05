@@ -191,38 +191,12 @@ class DistributionAnalyzer:
         print(f"   - IQR: {target_data.quantile(0.75) - target_data.quantile(0.25):.4f} mm")
 
         # Shape statistics
-        skewness = target_data.skew()
-        kurt = target_data.kurtosis()
+        skewness = float(target_data.skew())
+        kurt = float(target_data.kurtosis())
 
         print(f"\n📐 Shape Statistics:")
         print(f"   - Skewness: {skewness:.4f}")
-        if skewness > 1:
-            skew_interpretation = "Highly right-skewed (lệch phải mạnh)"
-        elif skewness > 0.5:
-            skew_interpretation = "Moderately right-skewed (lệch phải vừa)"
-        elif skewness > -0.5:
-            skew_interpretation = "Approximately symmetric (gần đối xứng)"
-        elif skewness > -1:
-            skew_interpretation = "Moderately left-skewed (lệch trái vừa)"
-        else:
-            skew_interpretation = "Highly left-skewed (lệch trái mạnh)"
-
-        print(f"     → Interpretation: {skew_interpretation}")
-
-        print(f"   - Kurtosis: {kurt:.4f}")
-        # NOTE: pandas.Series.kurtosis() returns EXCESS kurtosis (normal = 0).
-        # Thresholds per George & Mallery (2010): ±0.5 ~ near-normal, ±2 ~ pronounced.
-        if kurt > 2:
-            kurt_interpretation = "Leptokurtic (đuôi nặng, nhọn hơn normal rõ rệt)"
-        elif kurt > 0.5:
-            kurt_interpretation = "Slightly leptokurtic (hơi nhọn hơn normal)"
-        elif kurt > -0.5:
-            kurt_interpretation = "Mesokurtic (gần normal)"
-        elif kurt > -2:
-            kurt_interpretation = "Slightly platykurtic (hơi tù hơn normal)"
-        else:
-            kurt_interpretation = "Platykurtic (tù hơn normal rõ rệt)"
-        print(f"     → Interpretation: {kurt_interpretation}")
+        print(f"   - Excess Kurtosis: {kurt:.4f} (normal = 0)")
 
         # Vietnamese Meteorological Standards Classification using Config
         intensity_dist = self._classify_precipitation_intensity(target_data)
@@ -258,6 +232,67 @@ class DistributionAnalyzer:
                 'kurtosis': kurt
             },
             'intensity_distribution': intensity_dist
+        }
+
+    def analyze(self, date_col: Optional[str] = None, threshold: float = 0.1) -> Dict[str, Any]:
+        """Run complete distribution analysis suite (standard analyzer protocol)."""
+        results = {}
+        results['descriptive_stats'] = self.analyze_descriptive_stats()
+        results['target'] = self.analyze_target_variable()
+        results['intermittency'] = self.analyze_intermittency(date_col=date_col, threshold=threshold)
+        return results
+
+    @staticmethod
+    def interpret_skewness(skewness: float) -> str:
+        """Optional helper to interpret skewness value."""
+        if skewness > 1:
+            return "Highly right-skewed (lệch phải mạnh)"
+        elif skewness > 0.5:
+            return "Moderately right-skewed (lệch phải vừa)"
+        elif skewness > -0.5:
+            return "Approximately symmetric (gần đối xứng)"
+        elif skewness > -1:
+            return "Moderately left-skewed (lệch trái vừa)"
+        else:
+            return "Highly left-skewed (lệch trái mạnh)"
+
+    @staticmethod
+    def interpret_kurtosis(excess_kurt: float) -> str:
+        """Optional helper to interpret excess kurtosis value (normal = 0)."""
+        # Thresholds per George & Mallery (2010): ±0.5 ~ near-normal, ±2 ~ pronounced
+        if excess_kurt > 2:
+            return "Leptokurtic (đuôi nặng, nhọn hơn normal rõ rệt)"
+        elif excess_kurt > 0.5:
+            return "Slightly leptokurtic (hơi nhọn hơn normal)"
+        elif excess_kurt > -0.5:
+            return "Mesokurtic (gần normal)"
+        elif excess_kurt > -2:
+            return "Slightly platykurtic (hơi tù hơn normal)"
+        else:
+            return "Platykurtic (tù hơn normal rõ rệt)"
+
+    @staticmethod
+    def interpret_intermittency(adi: float, cv2: float) -> Dict[str, str]:
+        """Optional helper to classify Syntetos-Boylan intermittency metrics."""
+        ADI_THRESHOLD = 1.32
+        CV2_THRESHOLD = 0.49
+
+        if adi < ADI_THRESHOLD and cv2 < CV2_THRESHOLD:
+            classification = "SMOOTH"
+            model_rec = "Standard models (ARIMA, ML regression) appropriate"
+        elif adi < ADI_THRESHOLD and cv2 >= CV2_THRESHOLD:
+            classification = "ERRATIC"
+            model_rec = "Standard models OK but rainfall magnitude is volatile"
+        elif adi >= ADI_THRESHOLD and cv2 < CV2_THRESHOLD:
+            classification = "INTERMITTENT"
+            model_rec = "Croston/SBA/TSB recommended over standard ARIMA"
+        else:
+            classification = "LUMPY"
+            model_rec = "Specialized intermittent-demand or Tweedie single-stage models recommended"
+
+        return {
+            'classification': classification,
+            'model_recommendation': model_rec,
         }
     
     def test_normality(self) -> pd.DataFrame:
@@ -555,25 +590,9 @@ class DistributionAnalyzer:
         ADI_THRESHOLD = 1.32
         CV2_THRESHOLD = 0.49
 
-        if adi < ADI_THRESHOLD and cv2 < CV2_THRESHOLD:
-            classification = "SMOOTH"
-            model_rec = "Standard models (ARIMA, ML regression) appropriate"
-        elif adi < ADI_THRESHOLD and cv2 >= CV2_THRESHOLD:
-            classification = "ERRATIC"
-            model_rec = (
-                "Standard models OK but rainfall magnitude is volatile; "
-                "consider robust loss (Huber/quantile regression)"
-            )
-        elif adi >= ADI_THRESHOLD and cv2 < CV2_THRESHOLD:
-            classification = "INTERMITTENT"
-            model_rec = "Croston/SBA/TSB recommended over standard ARIMA"
-        else:
-            classification = "LUMPY"
-            model_rec = (
-                "TSB or IMAPA recommended; specialized intermittent-demand "
-                "models or Tweedie-loss single-stage regression are recommended "
-                "(two-stage is a legacy alternative but prone to recursive error propagation)"
-            )
+        interp = self.interpret_intermittency(adi, cv2)
+        classification = interp['classification']
+        model_rec = interp['model_recommendation']
 
         result = {
             'adi': adi,
@@ -589,7 +608,7 @@ class DistributionAnalyzer:
             'median_interval_days': float(intervals_days.median()),
         }
 
-        print(f"\n📊 INTERMITTENCY ANALYSIS (Syntetos-Boylan)")
+        print(f"\n📊 INTERMITTENCY METRICS (Syntetos-Boylan)")
         print(f"   Rain threshold: {threshold} mm")
         print(f"   Rain events: {n_rain:,} / {len(target_data):,} "
               f"({result['rain_day_pct']*100:.1f}%)")
@@ -597,8 +616,6 @@ class DistributionAnalyzer:
               f"(threshold {ADI_THRESHOLD})")
         print(f"   CV² (rainfall variability):  {cv2:.2f} "
               f"(threshold {CV2_THRESHOLD})")
-        print(f"   → Classification: {classification}")
-        print(f"   → Recommendation: {model_rec}")
 
         return result
     
@@ -700,6 +717,30 @@ class DistributionAnalyzer:
             logger.warning(f"Error in non-parametric tests for {col_name}: {e}")
         
         return test_result
+
+    def get_visualizer(self) -> "DistributionVisualizer":
+        """Get visualizer instance for this analyzer."""
+        return DistributionVisualizer(self)
+
+    def plot_target_distribution(self, **kwargs) -> plt.Figure:
+        """Plot comprehensive target variable distribution (6 panels)."""
+        return self.get_visualizer().plot_target_distribution(**kwargs)
+
+    def plot_target_histogram_kde(self, log_scale: bool = False, **kwargs) -> plt.Figure:
+        """Plot dedicated histogram + KDE overlay (linear or log scale)."""
+        return self.get_visualizer().plot_target_histogram_kde(log_scale=log_scale, **kwargs)
+
+    def plot_monthly_distribution(self, date_col: str = None, **kwargs) -> plt.Figure:
+        """Plot monthly box plot (12 boxes) showing seasonal precipitation distribution."""
+        return self.get_visualizer().plot_monthly_distribution(date_col=date_col, **kwargs)
+
+    def plot_all_features_overview(self, **kwargs) -> plt.Figure:
+        """Plot overview distribution for all features."""
+        return self.get_visualizer().plot_all_features_overview(**kwargs)
+
+    def plot_skewness_kurtosis_comparison(self, **kwargs) -> Tuple[plt.Figure, pd.DataFrame]:
+        """Plot skewness and kurtosis comparisons across features."""
+        return self.get_visualizer().plot_skewness_kurtosis_comparison(**kwargs)
 
 # =============================================================================
 # COMPLETE VISUALIZATION MODULE
@@ -822,12 +863,86 @@ class DistributionVisualizer:
         axes[1,2].grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.show()
+        if not kwargs.get('return_fig', True):
+            plt.show()
+        return fig
 
-    def plot_all_features_overview(self) -> None:
+    def plot_target_histogram_kde(self, log_scale: bool = False, return_fig: bool = True) -> plt.Figure:
+        """Plot dedicated histogram + KDE overlay for the target rainfall variable."""
+        target_data = self.analyzer.df[self.analyzer.target_col].dropna()
+        plot_data = np.log1p(target_data) if log_scale else target_data
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.hist(plot_data, bins=50, density=True, alpha=0.6, color='#2b5c8f', edgecolor='black')
+
+        kde = gaussian_kde(plot_data)
+        x_range = np.linspace(plot_data.min(), plot_data.max(), 300)
+        ax.plot(x_range, kde(x_range), color='#e26d5c', linewidth=2.5, label='KDE')
+
+        mean_val = plot_data.mean()
+        median_val = plot_data.median()
+        p95_val = plot_data.quantile(0.95)
+        ax.axvline(mean_val, color='#d90429', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.2f}')
+        ax.axvline(median_val, color='#2a9d8f', linestyle='--', linewidth=2, label=f'Median: {median_val:.2f}')
+        ax.axvline(p95_val, color='#f4a261', linestyle=':', linewidth=2, label=f'95th %: {p95_val:.2f}')
+
+        title_suffix = " (Log Scale: log(1 + mm))" if log_scale else " (Linear Scale: mm)"
+        ax.set_title(f'Target Distribution: {self.analyzer.target_col}{title_suffix}', fontsize=14, fontweight='bold')
+        ax.set_xlabel('log(1 + Precipitation)' if log_scale else 'Precipitation (mm)')
+        ax.set_ylabel('Density')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+        return fig
+
+    def plot_monthly_distribution(self, date_col: str = None, return_fig: bool = True) -> plt.Figure:
+        """Plot monthly box plot (12 boxes) showing seasonal distribution and tail behavior."""
+        from ..config.resolve import resolve_date_col
+        date_col = resolve_date_col(date_col)
+        df = self.analyzer.df.copy()
+        if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+            df[date_col] = pd.to_datetime(df[date_col])
+        df['Month'] = df[date_col].dt.month
+
+        fig, ax = plt.subplots(figsize=(14, 7))
+        wet_season_months = {5, 6, 7, 8, 9, 10, 11}
+
+        monthly_data = [df.loc[df['Month'] == m, self.analyzer.target_col].dropna().values for m in range(1, 13)]
+        bp = ax.boxplot(monthly_data, positions=range(1, 13), patch_artist=True,
+                        showmeans=True, meanline=True,
+                        flierprops=dict(marker='o', markerfacecolor='#e26d5c', markersize=4, alpha=0.6))
+
+        for idx, box in enumerate(bp['boxes'], start=1):
+            if idx in wet_season_months:
+                box.set_facecolor('#2b5c8f')
+                box.set_alpha(0.7)
+            else:
+                box.set_facecolor('#e9c46a')
+                box.set_alpha(0.7)
+
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='#2b5c8f', alpha=0.7, label='Wet Season (May - Nov)'),
+            Patch(facecolor='#e9c46a', alpha=0.7, label='Dry Season (Dec - Apr)'),
+        ]
+        ax.legend(handles=legend_elements, loc='upper left')
+        ax.set_title(f'Monthly Precipitation Distribution (12 Months): {self.analyzer.target_col}', fontsize=14, fontweight='bold')
+        ax.set_xlabel('Month')
+        ax.set_ylabel('Precipitation (mm)')
+        ax.set_xticks(range(1, 13))
+        ax.set_xticklabels([f'T{m}' for m in range(1, 13)])
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+        return fig
+
+    def plot_all_features_overview(self, return_fig: bool = True) -> plt.Figure:
         """
         Create distribution overview for all features
-        Based on ds.py lines 702-750 - MISSING in original refactor
+        Based on ds.py lines 702-750
         """
         # Calculate number of plots needed
         n_features = len(self.analyzer.analysis_cols)
@@ -848,16 +963,12 @@ class DistributionVisualizer:
             data = self.analyzer.df[col].dropna()
 
             if len(data) > 0:
-                # Create histogram with KDE
                 axes[i].hist(data, bins=30, density=True, alpha=0.7, 
                            color='skyblue', edgecolor='black')
-
-                # Add statistics
                 axes[i].axvline(data.mean(), color='red', linestyle='--', 
                               linewidth=1, alpha=0.8)
                 axes[i].axvline(data.median(), color='green', linestyle='--', 
                               linewidth=1, alpha=0.8)
-                
                 axes[i].set_title(f'{col}\nSkew: {data.skew():.2f}, Kurt: {data.kurtosis():.2f}', 
                                 fontsize=10)
                 axes[i].set_xlabel('Value')
@@ -869,15 +980,16 @@ class DistributionVisualizer:
             axes[i].set_visible(False)
 
         plt.tight_layout()
-        plt.show()
+        if not return_fig:
+            plt.show()
+        return fig
 
-    def plot_skewness_kurtosis_comparison(self) -> pd.DataFrame:
+    def plot_skewness_kurtosis_comparison(self, return_fig: bool = True) -> Tuple[plt.Figure, pd.DataFrame]:
         """
         Create skewness and kurtosis comparison charts
-        Based on ds.py lines 752-800 - MISSING in original refactor
         
         Returns:
-            DataFrame with skewness and kurtosis data
+            Tuple of (fig, skew_kurt_df)
         """
         skew_kurt_data = []
         for col in self.analyzer.analysis_cols:
@@ -896,8 +1008,8 @@ class DistributionVisualizer:
 
         # Skewness plot
         colors = ['red' if is_target else 'skyblue' for is_target in skew_kurt_df['Is_Target']]
-        bars1 = ax1.bar(range(len(skew_kurt_df)), skew_kurt_df['Skewness'], 
-                       color=colors, alpha=0.7)
+        ax1.bar(range(len(skew_kurt_df)), skew_kurt_df['Skewness'], 
+                color=colors, alpha=0.7)
         ax1.axhline(y=0, color='black', linestyle='-', linewidth=0.8)
         ax1.axhline(y=1, color='orange', linestyle='--', linewidth=0.8, 
                    alpha=0.7, label='Moderate Skew')
@@ -911,8 +1023,8 @@ class DistributionVisualizer:
         ax1.legend()
 
         # Kurtosis plot
-        bars2 = ax2.bar(range(len(skew_kurt_df)), skew_kurt_df['Kurtosis'], 
-                       color=colors, alpha=0.7)
+        ax2.bar(range(len(skew_kurt_df)), skew_kurt_df['Kurtosis'], 
+                color=colors, alpha=0.7)
         ax2.axhline(y=0, color='black', linestyle='-', linewidth=0.8, 
                    label='Normal (excess kurtosis = 0)')
         ax2.axhline(y=2, color='orange', linestyle='--', linewidth=0.8, 
@@ -927,9 +1039,9 @@ class DistributionVisualizer:
         ax2.legend()
 
         plt.tight_layout()
-        plt.show()
-
-        return skew_kurt_df
+        if not return_fig:
+            plt.show()
+        return fig, skew_kurt_df
 
 # =============================================================================
 # CONVENIENCE FUNCTIONS
@@ -974,3 +1086,9 @@ def analyze_distributions(df: pd.DataFrame,
     print("="*80)
 
     return results
+
+
+# Module-level aliases for optional interpretation helpers
+interpret_skewness = DistributionAnalyzer.interpret_skewness
+interpret_kurtosis = DistributionAnalyzer.interpret_kurtosis
+interpret_intermittency = DistributionAnalyzer.interpret_intermittency

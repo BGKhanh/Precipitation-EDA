@@ -49,7 +49,8 @@ class DataLoader:
         end_date: str = None,
         temporal_resolution: str = "daily",
         rename_columns: bool = True,
-        drop_redundant_radiation: bool = True,
+        exclude_year_2000: bool = True,
+        drop_redundant_radiation: bool = False,
     ) -> Optional[pd.DataFrame]:
         """
         Load weather data from CSV file (do NASAPowerCrawler tạo ra).
@@ -60,8 +61,10 @@ class DataLoader:
             temporal_resolution: 'daily' hoặc 'hourly' — PHẢI khớp với file
                 mà crawler đã lưu (tên file có chứa phần này).
             rename_columns: có đổi tên cột sang tiếng Việt theo Config.COLUMN_MAPPING không
-            drop_redundant_radiation: có drop 5 cột bức xạ/UV thiếu 100% trong năm 2000
-                (đã duyệt theo Option A dựa trên Feature Redundancy & Signal Capture)
+            exclude_year_2000: Loại bỏ toàn bộ năm 2000 (366 ngày) do lỗi thiếu dữ liệu hệ thống
+                (structural / system-driven missingness) trên 5 biến bức xạ/UV, giữ nguyên trọn vẹn 36 cột.
+                Mặc định True theo policy mới.
+            drop_redundant_radiation: Legacy flag: có drop 5 cột bức xạ/UV không (mặc định False).
 
         Returns:
             DataFrame hoặc None nếu load thất bại.
@@ -112,6 +115,15 @@ class DataLoader:
 
         df = self._convert_date_column(df)
 
+        if exclude_year_2000:
+            date_col = "Ngày" if "Ngày" in df.columns else "DATE"
+            if date_col in df.columns:
+                df = df[df[date_col] >= "2001-01-01"].reset_index(drop=True)
+                logger.info(
+                    "Đã loại bỏ năm 2000 (structural/system-driven missingness). Kích thước sạch: %s (36 cột)",
+                    df.shape,
+                )
+
         if drop_redundant_radiation:
             df = self._drop_redundant_radiation_columns(df)
 
@@ -119,22 +131,12 @@ class DataLoader:
 
     @staticmethod
     def _drop_redundant_radiation_columns(df: pd.DataFrame) -> pd.DataFrame:
-        """Drop 5 radiation/UV columns that have 100% missing data in the year 2000.
-
-        Rationale (Approved Option A):
-        The missingness (366 days in year 2000) is caused by sensor collection onset,
-        not random sensor failure. The meteorological and predictive signals are already
-        fully captured with 0 missing data by retained variables:
-          - 'Bức xạ sóng ngắn bề mặt' (ALLSKY_SFC_SW_DWN, r=-0.3873 vs r=-0.3876)
-          - 'Bức xạ quang hợp tổng' (ALLSKY_SFC_PAR_TOT)
-        Dropping avoids imputing an entire year of synthetic data while preserving 100%
-        of the temporal continuity and training sample size (2000-2025).
-        """
+        """Drop 5 radiation/UV columns (Legacy Option A)."""
         cols_to_drop = [c for c in DROPPED_RADIATION_COLUMNS if c in df.columns]
         if cols_to_drop:
             df = df.drop(columns=cols_to_drop)
             logger.info(
-                "Đã drop %d cột bức xạ/UV dư thừa (100%% missing năm 2000): %s",
+                "Đã drop %d cột bức xạ/UV: %s",
                 len(cols_to_drop),
                 cols_to_drop,
             )

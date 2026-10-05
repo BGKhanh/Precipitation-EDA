@@ -55,8 +55,12 @@ class MLForecastAdapter(BaseNixtlaAdapter):
         if not {'unique_id', 'ds', 'y'}.issubset(df.columns):
             df = to_nixtla_format(df)
 
-        # Enforce direct multi-horizon training
-        self._mlf.fit(df, max_horizon=self.max_horizon, **kwargs)
+        if not kwargs.get('use_exog', False) and {'unique_id', 'ds', 'y'}.issubset(df.columns):
+            df = df[['unique_id', 'ds', 'y']]
+
+        # Enforce direct multi-horizon training and handle non-static features
+        static_features = kwargs.pop('static_features', [])
+        self._mlf.fit(df, static_features=static_features, max_horizon=self.max_horizon, **kwargs)
         self.is_fitted = True
         return self
 

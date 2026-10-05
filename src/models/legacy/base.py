@@ -97,6 +97,12 @@ class BaseRainfallModel(ABC):
         print(f"Training {self.__class__.__name__}...")
         print(f"   Approach: {'Two-stage' if self.use_two_stage else 'Single-stage'}")
         
+        # Filter numeric features only (drop datetime columns like 'Ngày', 'date', 'ds')
+        if isinstance(X, pd.DataFrame):
+            num_cols = [c for c in X.columns if np.issubdtype(X[c].dtype, np.number)]
+            self.feature_columns_ = num_cols
+            X = X[num_cols]
+
         if self.use_two_stage:
             self._fit_two_stage(X, y, **kwargs)
         else:
@@ -199,6 +205,10 @@ class BaseRainfallModel(ABC):
         """
         self._validate_fitted()
         
+        if isinstance(X, pd.DataFrame) and hasattr(self, 'feature_columns_'):
+            valid_cols = [c for c in self.feature_columns_ if c in X.columns]
+            X = X[valid_cols]
+
         if self.use_two_stage:
             return self._predict_two_stage(X, return_calibrated=return_calibrated)
         else:
@@ -504,6 +514,9 @@ def evaluate_rainfall_model(model: BaseRainfallModel,
         'approach': 'two_stage' if model.use_two_stage else 'single_stage',
         'classification_threshold': model.classification_threshold,
     }
+
+    if not isinstance(y_test, pd.Series):
+        y_test = pd.Series(y_test)
     
     if model.use_two_stage:
         tau = threshold if threshold is not None else getattr(model, 'optimal_threshold_', 0.5)

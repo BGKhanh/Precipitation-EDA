@@ -1,0 +1,44 @@
+"""Benchmark utilities, experimental protocols, and artifact contracts (Backward Compatibility Shim).
+
+Canonical location: ``src.evaluation.protocols``
+"""
+
+from src.evaluation.protocols import (
+    UNIFIED_SCHEMA,
+    ExecutionStatus,
+    FutureCovariatePolicy,
+    GENUINELY_KNOWN_FUTURE_COLUMNS,
+    get_hardware_metadata,
+    measure_execution_resource,
+    load_canonical_data,
+    load_full_refit_data,
+    build_purged_direct_samples,
+    compute_benchmark_metrics,
+    save_benchmark_artifacts,
+    get_default_contract,
+    save_modeling_contract,
+    load_modeling_contract,
+    RESULTS_DIR,
+    CONTRACT_PATH,
+    EDA_REPORT_PATH,
+)
+
+__all__ = [
+    'UNIFIED_SCHEMA',
+    'ExecutionStatus',
+    'FutureCovariatePolicy',
+    'GENUINELY_KNOWN_FUTURE_COLUMNS',
+    'get_hardware_metadata',
+    'measure_execution_resource',
+    'load_canonical_data',
+    'load_full_refit_data',
+    'build_purged_direct_samples',
+    'compute_benchmark_metrics',
+    'save_benchmark_artifacts',
+    'get_default_contract',
+    'save_modeling_contract',
+    'load_modeling_contract',
+    'RESULTS_DIR',
+    'CONTRACT_PATH',
+    'EDA_REPORT_PATH',
+]

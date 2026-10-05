@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
-from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
+from scipy.cluster.hierarchy import dendrogram, linkage, fcluster, set_link_color_palette
 from scipy.spatial.distance import squareform
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -300,21 +300,14 @@ class CorrelationAnalyzer:
         strong_predictors = target_corr[target_corr > 0.3]
         moderate_predictors = target_corr[(target_corr > 0.2) & (target_corr <= 0.3)]
 
-        print(f"\n🎯 CORRELATION ANALYSIS EXECUTIVE SUMMARY:")
+        print(f"\n🎯 CORRELATION ANALYSIS QUANTITATIVE SUMMARY:")
         print("="*60)
-        print(f"🌧️ PRECIPITATION PREDICTION INSIGHTS:")
+        print(f"🌧️ Target Variable Correlations ({self.target_col}):")
         print(f"   - Strong predictors (|r| > 0.3): {len(strong_predictors)}")
-        print(f"   - Moderate predictors (0.2 < |r| ≤ 0.3): {len(moderate_predictors)}")
+        print(f"   - Moderate predictors (0.2 < |r| <= 0.3): {len(moderate_predictors)}")
 
-        # Temporal insights
-        if temporal_results['rolling_correlations']:
-            print(f"\n📈 DYNAMIC CORRELATION INSIGHTS:")
-            for var, results in temporal_results['rolling_correlations'].items():
-                stability = "Stable" if results['std_correlation'] < 0.1 else "Variable"
-                print(f"   - {var}: {stability} correlation")
-
-        # Clustering insights
-        print(f"\n🔬 CLUSTERING INSIGHTS:")
+        # Clustering quantitative summary
+        print(f"\n🔬 Clustering Summary:")
         print(f"   - Feature clusters identified: {len(clustering_results['feature_clusters'])}")
         if len(clustering_results['pca_results']) > 0:
             top_pc = clustering_results['pca_results'].iloc[0]
@@ -329,6 +322,68 @@ class CorrelationAnalyzer:
             'strong_predictors': strong_predictors,
             'moderate_predictors': moderate_predictors
         }
+
+    def analyze(self) -> Dict[str, Any]:
+        """Run complete correlation analysis suite (standard analyzer protocol)."""
+        return self.generate_insights_report()
+
+    # --- Convenience Plotting Methods ---
+
+    def plot_full_correlation_matrix(self, method: str = 'spearman',
+                                     figsize: Tuple[int, int] = (14, 12),
+                                     return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot full correlation matrix heatmap."""
+        viz = CorrelationVisualizer(self)
+        return viz.visualize_full_correlation_matrix(method=method, figsize=figsize, return_fig=return_fig)
+
+    def plot_dendrogram(self, clustering_results: Optional[Dict[str, Any]] = None,
+                         figsize: Tuple[int, int] = (12, 6),
+                         return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot hierarchical clustering dendrogram."""
+        viz = CorrelationVisualizer(self)
+        return viz.visualize_dendrogram(clustering_results=clustering_results, figsize=figsize, return_fig=return_fig)
+
+    def plot_meteorological_correlations(self, return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot 4-panel meteorological correlation diagnostics."""
+        viz = CorrelationVisualizer(self)
+        meteorological_results = self.analyze_meteorological_correlations()
+        return viz.visualize_meteorological_correlations(
+            meteorological_results['correlations'],
+            meteorological_results['feature_groups'],
+            return_fig=return_fig
+        )
+
+    def plot_clustering(self, clustering_results: Optional[Dict[str, Any]] = None,
+                        return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot PCA and clustering diagnostics."""
+        viz = CorrelationVisualizer(self)
+        if clustering_results is None:
+            clustering_results = self.analyze_feature_clustering()
+        return viz.visualize_clustering_analysis(clustering_results, return_fig=return_fig)
+
+    def plot_temporal_dynamics(self, temporal_results: Optional[Dict[str, Any]] = None,
+                               return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot seasonal, rolling, and lagged correlation dynamics."""
+        viz = CorrelationVisualizer(self)
+        if temporal_results is None:
+            temporal_results = self.analyze_temporal_dynamics()
+        return viz.visualize_temporal_dynamics(temporal_results, return_fig=return_fig)
+
+    def plot_multicollinearity(self, vif_df: Optional[pd.DataFrame] = None,
+                               return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot VIF multicollinearity diagnostics."""
+        viz = CorrelationVisualizer(self)
+        if vif_df is None:
+            vif_df = self.analyze_multicollinearity()
+        return viz.visualize_multicollinearity(vif_df, return_fig=return_fig)
+
+    def plot_feature_network(self, network: Optional[nx.Graph] = None,
+                             return_fig: bool = True) -> Optional[plt.Figure]:
+        """Plot feature correlation network graph."""
+        viz = CorrelationVisualizer(self)
+        if network is None:
+            network, _ = self.analyze_feature_network()
+        return viz.visualize_feature_network(network, [], return_fig=return_fig)
 
     def _categorize_meteorological_features(self) -> Dict[str, List[str]]:
         """Categorize features by meteorological types using Config"""
@@ -487,8 +542,123 @@ class CorrelationVisualizer:
         plt.rcParams['figure.figsize'] = (15, 10)
         plt.rcParams['font.size'] = 10
 
+    def visualize_full_correlation_matrix(self, method: str = 'spearman',
+                                          figsize: Tuple[int, int] = (14, 12),
+                                          return_fig: bool = True) -> Optional[plt.Figure]:
+        """
+        Visualize the full correlation matrix as a high-density heatmap.
+        
+        Args:
+            method: Correlation method ('pearson' or 'spearman')
+            figsize: Figure dimensions
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
+        """
+        corr_matrix = self.analyzer.df[self.analyzer.analysis_cols].corr(method=method)
+        fig, ax = plt.subplots(figsize=figsize)
+        mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+        
+        # Display annotations if <= 15 features, otherwise cleaner view
+        show_annot = len(self.analyzer.analysis_cols) <= 15
+        sns.heatmap(
+            corr_matrix,
+            mask=mask,
+            annot=show_annot,
+            fmt='.2f',
+            cmap='RdBu_r',
+            center=0,
+            square=True,
+            linewidths=0.5,
+            cbar_kws={"shrink": 0.8, "label": f"{method.capitalize()} Correlation"},
+            ax=ax
+        )
+        ax.set_title(f'Full Meteorological Correlation Matrix ({method.capitalize()})',
+                     fontsize=14, fontweight='bold', pad=15)
+        ax.tick_params(axis='x', rotation=45, labelsize=9)
+        ax.tick_params(axis='y', rotation=0, labelsize=9)
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
+
+    def visualize_dendrogram(
+        self, 
+        clustering_results: Optional[Dict[str, Any]] = None,
+        figsize: Tuple[int, int] = (12, 6),
+        return_fig: bool = True
+    ) -> Optional[plt.Figure]:
+        """
+        Dedicated dendrogram plot for hierarchical clustering of predictor features.
+        
+        Args:
+            clustering_results: Results from analyze_feature_clustering()
+            figsize: Figure dimensions
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
+        """
+        if clustering_results is None:
+            clustering_results = self.analyzer.analyze_feature_clustering()
+        
+        linkage_matrix = clustering_results.get('linkage_matrix')
+        if linkage_matrix is None:
+            return None
+            
+        fig, ax = plt.subplots(figsize=figsize)
+
+        set_link_color_palette([
+            '#0072B2',  # blue
+            '#D55E00',  # orange
+            '#009E73',  # green
+            '#CC79A7',  # purple
+            '#E69F00',  # yellow-orange
+            '#56B4E9',  # light blue
+            '#F0E442',  # yellow
+        ])
+    
+        dendrogram(
+            linkage_matrix,
+            labels=self.analyzer.predictor_cols,
+            ax=ax,
+            orientation='top',
+            leaf_rotation=45,
+            leaf_font_size=10,
+            color_threshold=0.9,
+            above_threshold_color='#444444'
+        )
+        # threshold = 0.7 * linkage_matrix[:, 2].max()
+
+        # result = dendrogram(
+        #     linkage_matrix,
+        #     labels=self.analyzer.predictor_cols,
+        #     ax=ax,
+        #     color_threshold=threshold,
+        #     above_threshold_color='#444444'
+        # )
+
+        # print("Threshold:", threshold)
+        # print("Colors:", result["color_list"])
+        # Tránh ảnh hưởng tới các plot khác
+        set_link_color_palette(None)
+
+        ax.set_title(
+            'Hierarchical Feature Clustering Dendrogram (Ward Distance)',
+            fontsize=14, 
+            fontweight='bold', 
+            pad=15
+        )
+        
+        ax.set_ylabel('Cluster Distance')
+        ax.set_xlabel('Predictor Features')
+        ax.grid(True, alpha=0.3, axis='y')
+        fig.tight_layout()
+        
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
+
     def visualize_meteorological_correlations(self, correlations: Dict[str, pd.DataFrame],
-                                           feature_groups: Dict[str, List[str]]) -> None:
+                                           feature_groups: Dict[str, List[str]],
+                                           return_fig: bool = False) -> Optional[plt.Figure]:
         """Visualize meteorological correlation matrices"""
         fig, axes = plt.subplots(2, 2, figsize=(20, 16))
         fig.suptitle('Meteorological Cross-Correlation Analysis',
@@ -523,10 +693,14 @@ class CorrelationVisualizer:
                    cbar_kws={"shrink": .8}, fmt='.2f', ax=axes[1,1])
         axes[1,1].set_title('Nonlinearity Detection', fontweight='bold')
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
-    def visualize_clustering_analysis(self, clustering_results: Dict[str, Any]) -> None:
+    def visualize_clustering_analysis(self, clustering_results: Dict[str, Any],
+                                    return_fig: bool = False) -> Optional[plt.Figure]:
         """Visualize clustering and PCA results"""
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
         fig.suptitle('Feature Clustering & PCA Analysis', fontsize=16, fontweight='bold')
@@ -559,15 +733,20 @@ class CorrelationVisualizer:
         axes[1,1].set_ylabel('|Correlation| with Target')
         axes[1,1].grid(True, alpha=0.3)
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
-    def visualize_temporal_dynamics(self, temporal_results: Dict[str, Any]) -> None:
+    def visualize_temporal_dynamics(self, temporal_results: Dict[str, Any],
+                                   return_fig: bool = False) -> Optional[plt.Figure]:
         """
         Visualize temporal correlation dynamics
         
         Args:
             temporal_results: Results from analyze_temporal_dynamics()
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
         """
         fig, axes = plt.subplots(2, 2, figsize=(18, 12))
         fig.suptitle('Temporal Correlation Dynamics Analysis', 
@@ -678,19 +857,24 @@ class CorrelationVisualizer:
                       fontsize=11, verticalalignment='top', fontfamily='monospace',
                       bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.8))
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
-    def visualize_multicollinearity(self, vif_df: pd.DataFrame) -> None:
+    def visualize_multicollinearity(self, vif_df: pd.DataFrame,
+                                    return_fig: bool = False) -> Optional[plt.Figure]:
         """
         Visualize multicollinearity analysis results
         
         Args:
             vif_df: DataFrame with VIF scores from analyze_multicollinearity()
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
         """
         if vif_df.empty:
             print("⚠️ No multicollinearity data to visualize")
-            return
+            return None
             
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
         fig.suptitle('Multicollinearity Analysis', fontsize=16, fontweight='bold')
@@ -775,20 +959,25 @@ class CorrelationVisualizer:
                       fontsize=10, verticalalignment='top', fontfamily='monospace',
                       bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.8))
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
-    def visualize_feature_network(self, network: nx.Graph, edges: List) -> None:
+    def visualize_feature_network(self, network: nx.Graph, edges: List,
+                                  return_fig: bool = False) -> Optional[plt.Figure]:
         """
         Visualize feature interaction network
         
         Args:
             network: NetworkX graph from analyze_feature_network()
             edges: Edge list with correlations
+            return_fig: If True, returns matplotlib Figure without calling plt.show()
         """
         if network.number_of_nodes() == 0:
             print("⚠️ No network data to visualize")
-            return
+            return None
             
         fig, axes = plt.subplots(2, 2, figsize=(18, 12))
         fig.suptitle('Feature Interaction Network Analysis', 
@@ -897,8 +1086,11 @@ class CorrelationVisualizer:
                       fontsize=10, verticalalignment='top', fontfamily='monospace',
                       bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.8))
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        if not return_fig:
+            plt.show()
+            return None
+        return fig
 
 
 # =============================================================================

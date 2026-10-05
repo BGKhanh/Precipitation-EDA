@@ -50,6 +50,9 @@ class StatsForecastAdapter(BaseNixtlaAdapter):
         if not {'unique_id', 'ds', 'y'}.issubset(df.columns):
             df = to_nixtla_format(df)
 
+        if not kwargs.get('use_exog', False) and {'unique_id', 'ds', 'y'}.issubset(df.columns):
+            df = df[['unique_id', 'ds', 'y']]
+
         self._sf.fit(df)
         self.is_fitted = True
         return self
