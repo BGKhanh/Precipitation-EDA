@@ -279,19 +279,20 @@ class DistributionAnalyzer:
 
         if adi < ADI_THRESHOLD and cv2 < CV2_THRESHOLD:
             classification = "SMOOTH"
-            model_rec = "Standard models (ARIMA, ML regression) appropriate"
+            model_rec = "Standard continuous models (ARIMA, ML regression) suitable"
         elif adi < ADI_THRESHOLD and cv2 >= CV2_THRESHOLD:
             classification = "ERRATIC"
-            model_rec = "Standard models OK but rainfall magnitude is volatile"
+            model_rec = "Frequent occurrences with volatile positive amounts"
         elif adi >= ADI_THRESHOLD and cv2 < CV2_THRESHOLD:
             classification = "INTERMITTENT"
-            model_rec = "Croston/SBA/TSB recommended over standard ARIMA"
+            model_rec = "Infrequent occurrences with relatively stable positive amounts"
         else:
             classification = "LUMPY"
-            model_rec = "Specialized intermittent-demand or Tweedie single-stage models recommended"
+            model_rec = "Infrequent occurrence with highly variable amounts; motivates Two-Stage Hurdle or Tweedie models"
 
         return {
             'classification': classification,
+            'analogy_label': f"{classification}-like (demand taxonomy analogy)",
             'model_recommendation': model_rec,
         }
     
@@ -524,6 +525,7 @@ class DistributionAnalyzer:
         self,
         date_col: str = None,
         threshold: float = None,
+        inclusive_wet: bool = True,
     ) -> Dict[str, Any]:
         """Syntetos-Boylan classification for intermittent rainfall.
 
@@ -546,11 +548,12 @@ class DistributionAnalyzer:
             threshold: Rain / no-rain threshold (mm).  Should match
                 ``EDAReport.validated_rain_threshold`` for consistency
                 with the two-stage classifier.  Defaults to 0.1 if not
-                provided, but callers should wire the validated threshold
-                from ``EDAPipeline`` to avoid drift between definitions.
+                provided.
+            inclusive_wet: If True (default), defines Wet as Y >= threshold (or Y > 0 if threshold == 0).
+                If False, defines Wet as Y > threshold.
 
         Returns:
-            Dict with ADI, CV², classification, and model recommendations.
+            Dict with ADI, CV², classification, episode durations, and model recommendations.
         """
         from ..config.resolve import resolve_date_col
 
@@ -558,11 +561,14 @@ class DistributionAnalyzer:
         threshold = threshold if threshold is not None else 0.1
 
         target_data = self.df[self.target_col]
-        rain_mask = target_data > threshold
+        if inclusive_wet:
+            rain_mask = (target_data >= threshold) if threshold > 0 else (target_data > 0.0)
+        else:
+            rain_mask = target_data > threshold
 
         n_rain = int(rain_mask.sum())
         if n_rain < 2:
-            return {'classification': 'INSUFFICIENT_DATA', 'n_rain_events': n_rain}
+            return {'classification': 'INSUFFICIENT_DATA', 'n_rain_events': n_rain, 'n_episodes': n_rain}
 
         # ADI: Average Demand Interval — use CALENDAR DAYS, not row indices.
         # np.diff(positional_index) silently assumes no missing dates, which
@@ -582,40 +588,92 @@ class DistributionAnalyzer:
         intervals_days = rain_dates_sorted.diff().dt.days.dropna()
         adi = float(intervals_days.mean())
 
-        # CV²: coefficient of variation squared of non-zero rainfall
-        rain_values = target_data[rain_mask]
-        cv2 = float((rain_values.std() / rain_values.mean()) ** 2)
+        # Contiguous wet runs and boundary censoring analysis
+        runs = []
+        cur_len = 0
+        for val in rain_mask:
+            if val:
+                cur_len += 1
+            else:
+                if cur_len > 0:
+                    runs.append(cur_len)
+                    cur_len = 0
+        right_censored = False
+        if cur_len > 0:
+            runs.append(cur_len)
+            right_censored = True
 
-        # Syntetos-Boylan classification thresholds
+        n_episodes = len(runs)
+        n_rc = 1 if right_censored else 0
+        mean_duration_all = float(np.mean(runs)) if runs else 0.0
+        mean_duration_uncensored = float(np.mean(runs[:-1])) if (right_censored and len(runs) > 1) else mean_duration_all
+
+        # CV and CV² computed on positive/wet rainfall population (Y | wet)
+        rain_values = target_data[rain_mask]
+        pos_mean = float(rain_values.mean())
+        pos_std = float(rain_values.std())
+        cv = float(pos_std / pos_mean) if pos_mean > 0 else 0.0
+        cv2 = float(cv ** 2)
+
+        # Syntetos-Boylan classification thresholds (intermittent demand taxonomy analogy)
         ADI_THRESHOLD = 1.32
         CV2_THRESHOLD = 0.49
 
         interp = self.interpret_intermittency(adi, cv2)
         classification = interp['classification']
+        analogy_label = interp['analogy_label']
         model_rec = interp['model_recommendation']
 
+        # Distinguish ADI demand ratio (N / N_wet) from calendar mean gap between wet observations
+        adi_demand_ratio = float(len(target_data) / n_rain) if n_rain > 0 else np.nan
+        calendar_mean_gap = adi
+
         result = {
-            'adi': adi,
+            'adi': calendar_mean_gap,
+            'calendar_mean_gap_days': calendar_mean_gap,
+            'adi_demand_ratio': adi_demand_ratio,
             'cv2': cv2,
+            'cv': cv,
             'adi_threshold': ADI_THRESHOLD,
             'cv2_threshold': CV2_THRESHOLD,
             'classification': classification,
+            'syntetos_boylan_analogy': analogy_label,
             'model_recommendation': model_rec,
             'rain_threshold_used': threshold,
+            'wet_days_count': n_rain,
+            'wet_day_pct': float(rain_mask.mean()),
             'rain_day_pct': float(rain_mask.mean()),
-            'n_rain_events': n_rain,
-            'mean_rain_intensity_mm': float(rain_values.mean()),
-            'median_interval_days': float(intervals_days.median()),
+            'precipitation_episodes_onset': n_episodes,
+            'n_episodes': n_episodes,
+            'n_rain_events': n_episodes,
+            'n_right_censored': n_rc,
+            'mean_duration_all': round(mean_duration_all, 2),
+            'mean_duration_uncensored': round(mean_duration_uncensored, 2),
+            'mean_episode_duration_days': round(mean_duration_all, 2),
+            'duration_scope': "observed episode duration within analysis window",
+            'positive_sample_count': n_rain,
+            'positive_mean': pos_mean,
+            'positive_std': pos_std,
+            'mean_rain_intensity_mm': pos_mean,
+            'median_interval_days': float(intervals_days.median()) if len(intervals_days) > 0 else 0.0,
+            'taxonomy_note': (
+                "Syntetos-Boylan is a demand-forecasting intermittency taxonomy used here as an "
+                "exploratory diagnostic analogy, not an official meteorological standard."
+            )
         }
 
-        print(f"\n📊 INTERMITTENCY METRICS (Syntetos-Boylan)")
-        print(f"   Rain threshold: {threshold} mm")
-        print(f"   Rain events: {n_rain:,} / {len(target_data):,} "
-              f"({result['rain_day_pct']*100:.1f}%)")
-        print(f"   ADI (avg days between rain): {adi:.2f} "
+        print(f"\n📊 INTERMITTENCY METRICS (Syntetos-Boylan Analogy)")
+        print(f"   Diagnostic candidate threshold tau: {threshold} mm (inclusive: {inclusive_wet})")
+        print(f"   Wet days / positive observations: {n_rain:,} / {len(target_data):,} "
+              f"({result['wet_day_pct']*100:.2f}%)")
+        print(f"   Precipitation episodes: {n_episodes:,} (right-censored: {n_rc})")
+        print(f"   Mean episode duration: {mean_duration_all:.2f} days (uncensored: {mean_duration_uncensored:.2f} days)")
+        print(f"   ADI_tau (calendar mean gap between wet observations): {calendar_mean_gap:.2f} "
               f"(threshold {ADI_THRESHOLD})")
-        print(f"   CV² (rainfall variability):  {cv2:.2f} "
+        print(f"   ADI demand ratio (N / N_wet): {adi_demand_ratio:.2f}")
+        print(f"   Positive population CV: {cv*100:.2f}%, CV²: {cv2:.2f} "
               f"(threshold {CV2_THRESHOLD})")
+        print(f"   Intermittency pattern analogy: {classification}")
 
         return result
     
