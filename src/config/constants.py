@@ -203,8 +203,12 @@ class Config:
     TARGET_COL_VI = "Lượng mưa"
     
     # Vietnamese Meteorological Standards Classification (24h precipitation)
-    # Based on Vietnamese National Weather Service Standards
+    # Reference: QCVN 47:2018/BTNMT (Quy chuẩn kỹ thuật quốc gia về dự báo, cảnh báo khí tượng thủy văn)
+    # and Quyết định 18/2021/QĐ-TTg của Thủ tướng Chính phủ (Quy định về dự báo, cảnh báo thiên tai).
     PRECIPITATION_CLASSIFICATION = {
+        "authority": "Tổng cục Khí tượng Thủy văn / Bộ Tài nguyên và Môi trường Việt Nam",
+        "standard": "QCVN 47:2018/BTNMT & Quyết định 18/2021/QĐ-TTg",
+        "time_window": "24h daily accumulated precipitation (mm)",
         "categories": {
             "no_rain": {
                 "range": (0, 0),

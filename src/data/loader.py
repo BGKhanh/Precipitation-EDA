@@ -129,6 +129,11 @@ class DataLoader:
 
         return df
 
+    def load_canonical_data(self, return_dev_train: bool = True):
+        """Helper to load canonical splits via evaluation protocols."""
+        from ..evaluation.protocols import load_canonical_data as _load
+        return _load(return_dev_train=return_dev_train)
+
     @staticmethod
     def _drop_redundant_radiation_columns(df: pd.DataFrame) -> pd.DataFrame:
         """Drop 5 radiation/UV columns (Legacy Option A)."""
@@ -291,3 +296,11 @@ def time_series_split(
     )
 
     return train_df, test_df
+
+
+def load_canonical_data(
+    return_dev_train: bool = True,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Helper delegating to src.evaluation.protocols.load_canonical_data."""
+    from ..evaluation.protocols import load_canonical_data as _load
+    return _load(return_dev_train=return_dev_train)
