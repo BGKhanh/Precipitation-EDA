@@ -1,0 +1,59 @@
+{
+  "temporal_methods": "Dual FFT + MSTL (Continuous Wavelet excluded from primary pipeline)",
+  "wavelet_exclusion_rationale": "CWT ~175-182d periodicity has no downstream operational modeling usage; MSTL provides comprehensive multi-seasonal decomposition with lower complexity.",
+  "candidate_domain_periods": [
+    7,
+    30,
+    122,
+    365
+  ],
+  "fft_detected_periods": [
+    372,
+    122,
+    422,
+    575,
+    20,
+    24,
+    19,
+    72,
+    29,
+    45
+  ],
+  "mstl_periods": [
+    7,
+    30,
+    365
+  ],
+  "wet_season_months": [
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "dry_season_months": [
+    12,
+    1,
+    2,
+    3,
+    4
+  ],
+  "monthly_mean_rainfall_mm": {
+    "1": 0.3415,
+    "2": 0.2529,
+    "3": 0.4253,
+    "4": 1.4368,
+    "5": 5.1761,
+    "6": 5.9974,
+    "7": 6.4796,
+    "8": 5.8915,
+    "9": 6.1756,
+    "10": 6.9584,
+    "11": 3.3596,
+    "12": 1.0556
+  },
+  "period_distinction_note": "Observed FFT Peaks != Project Candidate Periods != Final Model Seasonal Parameters.",
+  "canonical_artifact_pointer": "reports/eda/01.4_temporal_structure_report.json"
+}

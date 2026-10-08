@@ -1,164 +1,228 @@
 # =============================================================================
-# COMPLETE REFACTOR: 4 ANALYSIS-VISUALIZATION PAIRS  
-# ✅ RESIDUAL ANALYSIS REMOVED - NOW HANDLED BY STATIONARITY
+# TEMPORAL STRUCTURE ANALYSIS — REFACTORED (PLAN v6)
+# Pure Analysis-Visualization Suite: Calendar/Seasonal, Dual FFT, and MSTL
+# Wavelet/CWT removed completely. Deterministic Leap-Day & Energy Conservation.
 # =============================================================================
 
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional, Sequence
+import warnings
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.fft import fft, fftfreq
-import warnings
+import scipy.signal as signal
+from statsmodels.tsa.seasonal import MSTL
 
 from ..config.constants import Config
 
 warnings.filterwarnings('ignore')
 
+
 class TemporalStructureAnalyzer:
-    """
-    ✅ REFACTORED: 4 Pure Analysis-Visualization Pairs
-    1. Seasonal Patterns (groupby-based)
-    2. FFT Frequency Analysis 
-    3. MSTL Decomposition (returns residual for Stationarity analysis)
-    4. Wavelet Analysis
+    """Khảo sát cấu trúc thời gian: Mùa vụ, Phổ tần số FFT, và Phân rã MSTL.
     
+    Cung cấp 3 cặp Phân tích - Trực quan hóa thuần túy (Pure Analysis-Visualization Pairs):
+    1. Seasonal & Calendar Patterns (Climatology theo cặp Month-Day với làm mượt tuần hoàn 15 ngày)
+    2. Dual FFT Frequency Analysis (Raw long-term [7, 730] + 30d detrended short-term [7, 30])
+    3. MSTL Multi-Seasonal Decomposition (trên thang đo log1p với windows=(11, 15, 19) explicit)
     """
 
-    def __init__(self, df: pd.DataFrame, target_col: str = None, date_col: str = None):
-        """Initialize with configurable parameters"""
+    def __init__(self, df: pd.DataFrame, target_col: Optional[str] = None, date_col: Optional[str] = None):
+        """Initialize with configurable parameters."""
         self.df = df.copy()
         self.target_col = target_col or Config.COLUMN_MAPPING.get('PRECTOTCORR', 'Lượng mưa')
         self.date_col = date_col or 'Ngày'
         self._prepare_data()
 
     def _prepare_data(self) -> None:
-        """Prepare data for temporal analysis"""
-        # Ensure datetime format
+        """Đảm bảo datetime, kiểm tra tính liên tục hàng ngày, tạo Month, Day, DayOfWeek."""
         if not pd.api.types.is_datetime64_any_dtype(self.df[self.date_col]):
             self.df[self.date_col] = pd.to_datetime(self.df[self.date_col], errors='coerce')
 
-        # Add time features
-        self.df['Month'] = self.df[self.date_col].dt.month
-        self.df['Year'] = self.df[self.date_col].dt.year
-        self.df['DayOfYear'] = self.df[self.date_col].dt.dayofyear
-        
-        # Sort by date
+        # Sắp xếp theo ngày
         self.df = self.df.sort_values(self.date_col).reset_index(drop=True)
 
+        # Kiểm tra tính liên tục thời gian hàng ngày (daily continuity)
+        diffs = self.df[self.date_col].diff().dropna()
+        if len(diffs) > 0:
+            days_diff = diffs.dt.days
+            if (days_diff != 1).any():
+                warnings.warn(
+                    f"Temporal series contains non-daily step gaps: min={days_diff.min()}d, max={days_diff.max()}d."
+                )
+
+        # Trích xuất các trường thời gian
+        self.df['Month'] = self.df[self.date_col].dt.month
+        self.df['Day'] = self.df[self.date_col].dt.day
+        self.df['Year'] = self.df[self.date_col].dt.year
+        self.df['DayOfYear'] = self.df[self.date_col].dt.dayofyear
+        self.df['DayOfWeek'] = self.df[self.date_col].dt.dayofweek
+
     # =============================================================================
-    # PAIR 1: SEASONAL PATTERNS - PURE SEPARATION ✅
+    # PAIR 1: SEASONAL PATTERNS & CALENDAR CLIMATOLOGY
     # =============================================================================
 
-    def analyze_seasonal_patterns(self,
-                                 time_units: List[str] = ['Month', 'DayOfYear', 'Year'],
-                                 agg_functions: List[str] = ['mean', 'std', 'median', 'count'],
-                                 quantile_threshold: float = 0.75) -> Dict[str, Any]:
-        """
-        ✅ PURE ANALYSIS: Seasonal pattern analysis (NO VISUALIZATION)
+    def analyze_seasonal_patterns(self) -> Dict[str, Any]:
+        """Phân tích thống kê theo Tháng, Ngày trong năm và Thứ trong tuần.
         
-        Args:
-            time_units: Time aggregation units to analyze
-            agg_functions: Statistical functions to apply
-            quantile_threshold: Threshold for wet/dry season identification
-            
+        Quy ước mùa dự án (Project Domain Convention):
+          - Mùa mưa (Wet season): Tháng 5, 6, 7, 8, 9, 10, 11 (May–Nov)
+          - Mùa khô (Dry season): Tháng 12, 1, 2, 3, 4 (Dec–Apr)
+          
+        Chỉ số ngày mưa:
+          - wet_day_pct_tau_1mm: Tỷ lệ ngày có lượng mưa Y >= 1.0 mm (quy ước dự án)
+          - positive_precip_pct: Tỷ lệ ngày có lượng mưa Y > 0.0 mm
+          
+        Làm mượt Climatology:
+          - Chuỗi ngày trong năm tổng hợp theo cặp (Month, Day) để tránh lệch pha năm nhuận.
+          - Đường làm mượt 15 ngày căn giữa áp dụng cơ chế circular wrap-around padding (+/- 7 ngày).
+          
         Returns:
-            Dict containing all seasonal analysis results
+            Dict chứa đầy đủ kết quả phân tích mùa vụ và chuỗi khí hậu.
         """
-        print(f"🔍 Analyzing Seasonal Patterns")
-        print(f"   - Time units: {time_units}")
-        print(f"   - Aggregations: {agg_functions}")
-        print(f"   - Quantile threshold: {quantile_threshold}")
+        wet_months = [5, 6, 7, 8, 9, 10, 11]
+        dry_months = [12, 1, 2, 3, 4]
 
-        results = {}
+        # 1. Thống kê theo từng Tháng (1..12)
+        monthly_records = []
+        monthly_dict = {}
+        for m in range(1, 13):
+            sub = self.df[self.df['Month'] == m][self.target_col].dropna()
+            m_mean = float(sub.mean()) if len(sub) > 0 else 0.0
+            m_median = float(sub.median()) if len(sub) > 0 else 0.0
+            m_std = float(sub.std()) if len(sub) > 0 else 0.0
+            m_count = int(len(sub))
+            m_wet_pct = float((sub >= 1.0).mean() * 100.0) if len(sub) > 0 else 0.0
+            m_pos_pct = float((sub > 0.0).mean() * 100.0) if len(sub) > 0 else 0.0
 
-        # Monthly analysis
-        if 'Month' in time_units:
-            monthly_stats = self.df.groupby('Month')[self.target_col].agg(agg_functions).round(4)
-            monthly_mean = self.df.groupby('Month')[self.target_col].mean()
-            
-            # Season identification with configurable threshold
-            wet_months = monthly_mean[monthly_mean > monthly_mean.quantile(quantile_threshold)].index.tolist()
-            dry_months = monthly_mean[monthly_mean < monthly_mean.quantile(1 - quantile_threshold)].index.tolist()
-            
-            results['monthly'] = {
-                'stats': monthly_stats,
-                'mean': monthly_mean,
-                'wet_months': wet_months,
-                'dry_months': dry_months,
-                'threshold_used': quantile_threshold
+            row = {
+                'Month': m,
+                'mean': round(m_mean, 4),
+                'median': round(m_median, 4),
+                'std': round(m_std, 4),
+                'count': m_count,
+                'wet_day_pct_tau_1mm': round(m_wet_pct, 2),
+                'positive_precip_pct': round(m_pos_pct, 2),
+                'season': 'Wet' if m in wet_months else 'Dry'
+            }
+            monthly_records.append(row)
+            monthly_dict[str(m)] = {
+                'mean': round(m_mean, 4),
+                'median': round(m_median, 4),
+                'std': round(m_std, 4),
+                'wet_day_pct_tau_1mm': round(m_wet_pct, 2),
+                'positive_precip_pct': round(m_pos_pct, 2),
             }
 
-        # Daily pattern within year
-        if 'DayOfYear' in time_units:
-            daily_pattern = self.df.groupby('DayOfYear')[self.target_col].agg(agg_functions)
-            results['daily_pattern'] = daily_pattern
+        monthly_df = pd.DataFrame(monthly_records)
+        monthly_mean_series = monthly_df.set_index('Month')['mean']
 
-        # Yearly analysis
-        if 'Year' in time_units:
-            yearly_stats = self.df.groupby('Year')[self.target_col].agg(agg_functions)
-            results['yearly'] = yearly_stats
+        # 2. Climatology 365 ngày chuẩn theo cặp (Month, Day)
+        # Loại trừ ngày 29/02 để tạo vector 365 ngày chuẩn
+        df_standard = self.df[~((self.df['Month'] == 2) & (self.df['Day'] == 29))]
+        daily_clim = df_standard.groupby(['Month', 'Day'])[self.target_col].mean().reset_index()
+        daily_clim['DayOfYear_Index'] = np.arange(1, 366)
+        raw_clim_values = daily_clim[self.target_col].values  # Độ dài 365
 
-        print(f"   ✅ Seasonal analysis completed")
-        return results
+        # Thống kê riêng biệt cho ngày 29/02 (năm nhuận)
+        df_leap = self.df[(self.df['Month'] == 2) & (self.df['Day'] == 29)]
+        feb29_stats = {
+            'count': int(len(df_leap)),
+            'mean': float(round(df_leap[self.target_col].mean(), 4)) if len(df_leap) > 0 else 0.0,
+            'years_observed': [int(y) for y in df_leap['Year'].unique()]
+        }
+
+        # Làm mượt tuần hoàn 15 ngày (Circular Wrap-Around Smoothing)
+        half_w = 15 // 2  # 7 ngày đệm
+        c_padded = np.concatenate([raw_clim_values[-half_w:], raw_clim_values, raw_clim_values[:half_w]])
+        s_padded = pd.Series(c_padded).rolling(window=15, center=True).mean().values
+        smoothed_clim_values = s_padded[half_w:-half_w]  # Chính xác 365 ngày, 0 NaNs
+
+        daily_clim['smoothed_15d_circular'] = smoothed_clim_values
+
+        # 3. Phân bố theo Thứ trong tuần (DayOfWeek: 0=Mon, 6=Sun)
+        dow_stats = self.df.groupby('DayOfWeek')[self.target_col].agg(['mean', 'median', 'std', 'count']).round(4)
+
+        return {
+            'monthly_table': monthly_df,
+            'monthly': monthly_df,
+            'monthly_mean': monthly_mean_series,
+            'monthly_dict': monthly_dict,
+            'wet_months': wet_months,
+            'dry_months': dry_months,
+            'climatology_365': {
+                'raw_daily': daily_clim,
+                'raw_values': raw_clim_values,
+                'smoothed_15d_circular': smoothed_clim_values,
+                'feb29_stats': feb29_stats
+            },
+            'day_of_week': dow_stats,
+            'climate_convention': {
+                'definition_type': 'domain_fixed_project_convention',
+                'convention_basis': 'project_domain_convention',
+                'wet_season_months': wet_months,
+                'dry_season_months': dry_months,
+            }
+        }
 
     def plot_seasonal_patterns(self,
-                              seasonal_results: Dict[str, Any],
-                              figsize: Tuple[int, int] = (16, 10),
-                              color_scheme: str = 'default',
-                              show_grid: bool = True,
-                              return_fig: bool = True) -> Optional[plt.Figure]:
-        """
-        Plot seasonal patterns across monthly, daily, and yearly dimensions.
-        
-        Args:
-            seasonal_results: Results from analyze_seasonal_patterns()
-            figsize: Figure size
-            color_scheme: Color scheme to use
-            show_grid: Whether to show grid
-            return_fig: If True, returns matplotlib Figure without calling plt.show()
-        """
+                               seasonal_results: Dict[str, Any],
+                               figsize: Tuple[int, int] = (16, 10),
+                               show_grid: bool = True,
+                               return_fig: bool = True) -> Optional[plt.Figure]:
+        """Trực quan hóa cấu trúc mùa vụ & khí hậu (4 panels)."""
         fig, axes = plt.subplots(2, 2, figsize=figsize)
-        fig.suptitle('Seasonal Patterns Analysis', fontsize=16, fontweight='bold')
+        fig.suptitle('Seasonal Patterns & Climatology Analysis', fontsize=16, fontweight='bold')
 
-        # Monthly boxplot
-        if 'monthly' in seasonal_results:
-            sns.boxplot(data=self.df, x='Month', y=self.target_col, ax=axes[0,0])
-            axes[0,0].set_title('Monthly Distribution')
-            axes[0,0].set_xlabel('Month')
-            axes[0,0].set_ylabel('Precipitation (mm)')
-            if show_grid:
-                axes[0,0].grid(True, alpha=0.3)
+        # Panel 1: Phân bố lượng mưa theo từng tháng (Boxplot)
+        sns.boxplot(data=self.df, x='Month', y=self.target_col, ax=axes[0, 0], palette='Blues')
+        axes[0, 0].set_title('Monthly Precipitation Distribution')
+        axes[0, 0].set_xlabel('Month')
+        axes[0, 0].set_ylabel('Precipitation (mm)')
+        if show_grid:
+            axes[0, 0].grid(True, alpha=0.3)
 
-        # Monthly average
-        if 'monthly' in seasonal_results:
-            monthly_mean = seasonal_results['monthly']['mean']
-            axes[0,1].bar(monthly_mean.index, monthly_mean.values, color='skyblue', alpha=0.7)
-            axes[0,1].set_title('Average Monthly Precipitation')
-            axes[0,1].set_xlabel('Month')
-            axes[0,1].set_ylabel('Average Precipitation (mm)')
-            if show_grid:
-                axes[0,1].grid(True, alpha=0.3)
+        # Panel 2: Lượng mưa trung bình theo tháng và chỉ dấu mùa khí hậu
+        monthly_table = seasonal_results['monthly_table']
+        colors = ['#2b83ba' if row['season'] == 'Wet' else '#fdae61' for _, row in monthly_table.iterrows()]
+        bars = axes[0, 1].bar(monthly_table['Month'], monthly_table['mean'], color=colors, alpha=0.85, edgecolor='black')
+        axes[0, 1].set_title('Average Monthly Precipitation (Wet: May-Nov, Dry: Dec-Apr)')
+        axes[0, 1].set_xlabel('Month')
+        axes[0, 1].set_ylabel('Mean Rainfall (mm/day)')
+        axes[0, 1].set_xticks(range(1, 13))
 
-        # Daily pattern within year
-        if 'daily_pattern' in seasonal_results:
-            daily_pattern = seasonal_results['daily_pattern']['mean']
-            axes[1,0].plot(daily_pattern.index, daily_pattern.values, 'b-', linewidth=1.5, alpha=0.8)
-            axes[1,0].set_title('Daily Pattern Throughout Year')
-            axes[1,0].set_xlabel('Day of Year')
-            axes[1,0].set_ylabel('Average Precipitation (mm)')
-            if show_grid:
-                axes[1,0].grid(True, alpha=0.3)
+        # Hiển thị tỷ lệ ngày mưa tau=1mm trên đỉnh cột
+        for bar, wet_pct in zip(bars, monthly_table['wet_day_pct_tau_1mm']):
+            yval = bar.get_height()
+            axes[0, 1].text(bar.get_x() + bar.get_width()/2.0, yval + 0.15, f"{wet_pct:.0f}%",
+                            ha='center', va='bottom', fontsize=9)
+        if show_grid:
+            axes[0, 1].grid(True, alpha=0.3)
 
-        # Yearly trend
-        if 'yearly' in seasonal_results:
-            yearly_mean = seasonal_results['yearly']['mean']
-            axes[1,1].plot(yearly_mean.index, yearly_mean.values, 'ro-', linewidth=2, markersize=6)
-            axes[1,1].set_title('Yearly Trend')
-            axes[1,1].set_xlabel('Year')
-            axes[1,1].set_ylabel('Average Precipitation (mm)')
-            if show_grid:
-                axes[1,1].grid(True, alpha=0.3)
+        # Panel 3: Climatology 365 ngày chuẩn (Month-Day based) + Làm mượt tuần hoàn 15 ngày
+        clim_data = seasonal_results['climatology_365']['raw_daily']
+        axes[1, 0].plot(clim_data['DayOfYear_Index'], clim_data[self.target_col],
+                        color='skyblue', alpha=0.5, linewidth=1.0, label='Raw Daily Mean (Month-Day)')
+        axes[1, 0].plot(clim_data['DayOfYear_Index'], clim_data['smoothed_15d_circular'],
+                        color='navy', linewidth=2.0, label='15-Day Circular Smoothed')
+        axes[1, 0].set_title('Day-of-Year Climatology (Circular 15-day Smoothing, No Leap Drift)')
+        axes[1, 0].set_xlabel('Day of Year (Calendar Month-Day, 1-365)')
+        axes[1, 0].set_ylabel('Precipitation (mm)')
+        axes[1, 0].legend(loc='upper right')
+        if show_grid:
+            axes[1, 0].grid(True, alpha=0.3)
+
+        # Panel 4: Phân bố theo Thứ trong tuần
+        dow_df = seasonal_results['day_of_week']
+        dow_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        axes[1, 1].bar(range(7), dow_df['mean'], color='teal', alpha=0.75, edgecolor='black')
+        axes[1, 1].set_title('Day-of-Week Precipitation Profile')
+        axes[1, 1].set_xlabel('Day of Week')
+        axes[1, 1].set_ylabel('Mean Precipitation (mm)')
+        axes[1, 1].set_xticks(range(7))
+        axes[1, 1].set_xticklabels(dow_names)
+        if show_grid:
+            axes[1, 1].grid(True, alpha=0.3)
 
         fig.tight_layout()
         if not return_fig:
@@ -167,762 +231,407 @@ class TemporalStructureAnalyzer:
         return fig
 
     # =============================================================================
-    # PAIR 2: FFT FREQUENCY ANALYSIS - PURE SEPARATION ✅
+    # PAIR 2: DUAL FFT FREQUENCY ANALYSIS (SCIPY PERIODOGRAM)
     # =============================================================================
 
     def analyze_fft(self,
-                   detrend_window: int = 30,
-                   top_n: int = 10,
-                   period_range: Tuple[int, int] = (7, 730),
-                   return_n_dominant: int = 10) -> Dict[str, Any]:
-        """
-        FFT-based frequency analysis with parameterized dominant periods.
+                    top_n: int = 10,
+                    raw_period_range: Tuple[int, int] = (7, 730),
+                    short_term_period_range: Tuple[int, int] = (7, 30),
+                    rtol: float = 1e-5,
+                    atol: float = 1e-8) -> Dict[str, Any]:
+        """Thực thi song song 2 phân tích phổ tần số qua scipy.signal.periodogram.
         
-        .. note:: Detrending Methodology & Detected Periods (Technical Note)
-        
-           The parameter ``detrend_window=30`` subtracts a 30-day centered moving
-           average from the series (``target_ts - target_ts.rolling(30, center=True).mean()``).
-           This operation acts as a high-pass filter with sinc-like frequency response
-           that strongly attenuates periodic signals of duration >= 30 days.
-           Consequently, FFT peaks identified by this specific method are confined
-           to intra-monthly variations (< 30 days, e.g. [27, 21, 20, 19, 17, 9] days).
+        Quy trình đánh giá đẳng thức năng lượng chuẩn mực:
+          Periodogram toàn dải -> Kiểm tra Parseval/Mean-Square trên literal full array -> Lọc band -> Peak Selection.
+          
+        1. 'fft_raw':
+           - Preprocessing: x_raw = Y - mean(Y) (N = len(df)). Mean-centered hoàn toàn.
+           - Parseval Identity: np.sum(pxx_raw) == np.mean(x_raw**2) == var(x_raw, ddof=0).
+           - Dải chẩn đoán & peak selection: raw_period_range = (7, 730) ngày inclusive.
            
-           In contrast:
-           - Domain periods [7, 30, 122, 365] are fixed candidate periods configured for
-             downstream modeling.
-           - Wavelet analysis uses raw data without this 30d moving average
-             subtraction, allowing it to preserve longer periodic structures (~175-182 days).
-        
-        Args:
-            detrend_window: Window size for trend removal (centered moving average)
-            top_n: Number of top periods to find during analysis
-            period_range: Valid period range (min_days, max_days)
-            return_n_dominant: Number of dominant periods to return for visualization
-            
-        Returns:
-            Dict containing FFT analysis results with configurable dominant periods
+        2. 'fft_short_term':
+           - Preprocessing: x_short = Y - rolling_30_center(Y).
+           - Xử lý biên: dropna() loại chính xác 29 NaNs biên (15 đầu, 14 cuối), N_valid = N - 29.
+           - Không re-mean-center; trung bình thực nghiệm được giữ nguyên.
+           - Năng lượng: np.sum(pxx_short) == np.mean(x_short_valid**2) == var + mean^2 (spectral mean-square energy).
+           - Dải trích xuất đỉnh: short_term_period_range = (7, 30) ngày inclusive.
         """
-        print(f"🔊 Enhanced FFT Frequency Analysis")
-        print(f"   - Detrend window: {detrend_window}")
-        print(f"   - Top periods to find: {top_n}")
-        print(f"   - Period range: {period_range}")
-        print(f"   - Dominant periods to return: {return_n_dominant}")
+        target_series = self.df.set_index(self.date_col)[self.target_col].dropna()
+        n_total = len(target_series)
 
-        # Prepare time series
-        ts_data = self.df.set_index(self.date_col).sort_index()
-        target_ts = ts_data[self.target_col].dropna()
+        # -------------------------------------------------------------
+        # A. FFT RAW (Mean-Centering Duy Nhất)
+        # -------------------------------------------------------------
+        x_raw = target_series - target_series.mean()
+        x_raw_vals = x_raw.values
 
-        if len(target_ts) < period_range[1]:
-            print(f"   ⚠️ Insufficient data for frequency analysis")
-            return {'success': False, 'error': 'Insufficient data'}
+        freqs_raw, pxx_raw = signal.periodogram(
+            x_raw_vals, fs=1.0, window='boxcar', detrend=False, return_onesided=True, scaling='spectrum'
+        )
 
-        # Detrend with configurable window
-        detrended = target_ts - target_ts.rolling(window=detrend_window, center=True).mean()
-        detrended = detrended.dropna()
+        # Đánh giá Đẳng thức Parseval trên literal full array
+        total_pwr_raw = float(np.sum(pxx_raw))
+        mean_sq_raw = float(np.mean(x_raw_vals ** 2))
+        var_raw = float(np.var(x_raw_vals, ddof=0))
+        abs_err_raw = abs(total_pwr_raw - var_raw)
+        rel_err_raw = abs_err_raw / var_raw if var_raw > 0 else 0.0
+        passed_raw = bool(np.isclose(total_pwr_raw, var_raw, rtol=rtol, atol=atol))
 
-        # Perform FFT
-        fft_values = fft(detrended.values)
-        frequencies = fftfreq(len(detrended), d=1)
+        energy_diag_raw = {
+            'total_power_full_spectrum': round(total_pwr_raw, 6),
+            'time_domain_mean_square': round(mean_sq_raw, 6),
+            'sample_variance': round(var_raw, 6),
+            'absolute_error': round(abs_err_raw, 10),
+            'relative_error': round(rel_err_raw, 10),
+            'validation_tolerance': {'rtol': rtol, 'atol': atol},
+            'passed': passed_raw
+        }
 
-        # Get positive frequencies
-        positive_freq_idx = frequencies > 0
-        positive_frequencies = frequencies[positive_freq_idx]
-        positive_fft_magnitude = np.abs(fft_values[positive_freq_idx])
-        periods = 1 / positive_frequencies
+        # Lọc dải chu kỳ raw: 7 <= T <= 730
+        pos_raw = freqs_raw > 0
+        freqs_pos_raw = freqs_raw[pos_raw]
+        pxx_pos_raw = pxx_raw[pos_raw]
+        periods_raw = 1.0 / freqs_pos_raw
 
-        # Find dominant periods with configurable range
-        peak_indices = np.argsort(positive_fft_magnitude)[-top_n:]
-        dominant_periods = periods[peak_indices]
+        raw_mask = (periods_raw >= raw_period_range[0]) & (periods_raw <= raw_period_range[1])
+        raw_indices = np.where(raw_mask)[0]
 
-        # Filter by period range
-        valid_periods = dominant_periods[
-            (dominant_periods >= period_range[0]) & 
-            (dominant_periods <= period_range[1])
-        ]
+        # Peak selection Option B: Top-N local spectral bins ranked by power
+        peaks_raw_rel, _ = signal.find_peaks(pxx_pos_raw[raw_mask])
+        peaks_raw_idx = raw_indices[peaks_raw_rel]
+        sorted_raw_idx = peaks_raw_idx[np.argsort(pxx_pos_raw[peaks_raw_idx])[::-1]]
 
-        # Sort and convert to integers
-        dominant_periods_int = sorted(list(set(np.round(valid_periods).astype(int))), reverse=True)
-        
-        # Return only the requested number of dominant periods
-        dominant_periods_return = dominant_periods_int[:return_n_dominant]
+        dominant_peaks_raw = []
+        for rank, idx in enumerate(sorted_raw_idx[:top_n], start=1):
+            dominant_peaks_raw.append({
+                'rank': rank,
+                'period_days': round(float(periods_raw[idx]), 2),
+                'frequency': round(float(freqs_pos_raw[idx]), 6),
+                'power': round(float(pxx_pos_raw[idx]), 6)
+            })
 
-        print(f"   📊 Found {len(dominant_periods_int)} total dominant periods")
-        print(f"   📊 Returning top {len(dominant_periods_return)} dominant periods:")
-        for i, period in enumerate(dominant_periods_return, 1):
-            print(f"      {i}. {period} days")
+        # Nearest peak to 365 days
+        nearest_annual_peak = None
+        if len(dominant_peaks_raw) > 0:
+            nearest_annual_peak = min(dominant_peaks_raw, key=lambda p: abs(p['period_days'] - 365.0))
+
+        fft_raw_results = {
+            'dominant_peaks': dominant_peaks_raw,
+            'dominant_periods': [p['period_days'] for p in dominant_peaks_raw],
+            'detected_periods': [p['period_days'] for p in dominant_peaks_raw],
+            'frequencies': freqs_raw,
+            'spectrum_power': pxx_raw,
+            'periods_positive': periods_raw,
+            'power_positive': pxx_pos_raw,
+            'energy_diagnostic': energy_diag_raw,
+            'frequency_bin_width_cycles_per_day': round(1.0 / n_total, 7),
+            'nearest_annual_peak': nearest_annual_peak,
+            'preprocessing': {
+                'method': 'mean_centering_only',
+                'formula': 'x = y - mean(y)',
+                'sample_size': n_total,
+                'zero_padding': False,
+                'power_definition': 'one_sided_power_spectrum_via_periodogram_scaling_spectrum',
+                'energy_conservation': 'parseval_identity_holds_full_power_sum_equals_sample_variance'
+            }
+        }
+
+        # -------------------------------------------------------------
+        # B. FFT SHORT-TERM (Rolling 30-Day Subtraction)
+        # -------------------------------------------------------------
+        rolling_30 = target_series.rolling(window=30, center=True).mean()
+        x_short_raw = target_series - rolling_30
+        x_short_valid = x_short_raw.dropna()
+        n_valid = len(x_short_valid)
+
+        freqs_short, pxx_short = signal.periodogram(
+            x_short_valid.values, fs=1.0, window='boxcar', detrend=False, return_onesided=True, scaling='spectrum'
+        )
+
+        # Đánh giá Năng lượng trên literal full array
+        total_pwr_short = float(np.sum(pxx_short))
+        mean_sq_short = float(np.mean(x_short_valid.values ** 2))
+        var_short = float(np.var(x_short_valid.values, ddof=0))
+        mean_short = float(np.mean(x_short_valid.values))
+        abs_err_short = abs(total_pwr_short - mean_sq_short)
+        rel_err_short = abs_err_short / mean_sq_short if mean_sq_short > 0 else 0.0
+        passed_short = bool(np.isclose(total_pwr_short, mean_sq_short, rtol=rtol, atol=atol))
+
+        energy_diag_short = {
+            'total_power_full_spectrum': round(total_pwr_short, 6),
+            'time_domain_mean_square': round(mean_sq_short, 6),
+            'sample_variance': round(var_short, 6),
+            'sample_mean': round(mean_short, 6),
+            'absolute_error': round(abs_err_short, 10),
+            'relative_error': round(rel_err_short, 10),
+            'validation_tolerance': {'rtol': rtol, 'atol': atol},
+            'passed': passed_short
+        }
+
+        # Lọc dải trích xuất đỉnh: short_term_period_range [7, 30]
+        pos_short = freqs_short > 0
+        freqs_pos_short = freqs_short[pos_short]
+        pxx_pos_short = pxx_short[pos_short]
+        periods_short = 1.0 / freqs_pos_short
+
+        short_mask = (periods_short >= short_term_period_range[0]) & (periods_short <= short_term_period_range[1])
+        short_indices = np.where(short_mask)[0]
+
+        # Peak selection Option B: Top-N local spectral bins trong [7, 30]
+        peaks_short_rel, _ = signal.find_peaks(pxx_pos_short[short_mask])
+        peaks_short_idx = short_indices[peaks_short_rel]
+        sorted_short_idx = peaks_short_idx[np.argsort(pxx_pos_short[peaks_short_idx])[::-1]]
+
+        dominant_peaks_short = []
+        for rank, idx in enumerate(sorted_short_idx[:top_n], start=1):
+            dominant_peaks_short.append({
+                'rank': rank,
+                'period_days': round(float(periods_short[idx]), 2),
+                'frequency': round(float(freqs_pos_short[idx]), 6),
+                'power': round(float(pxx_pos_short[idx]), 6)
+            })
+
+        fft_short_results = {
+            'dominant_peaks': dominant_peaks_short,
+            'dominant_periods': [p['period_days'] for p in dominant_peaks_short],
+            'detected_periods': [p['period_days'] for p in dominant_peaks_short],
+            'frequencies': freqs_short,
+            'spectrum_power': pxx_short,
+            'periods_positive': periods_short,
+            'power_positive': pxx_pos_short,
+            'energy_diagnostic': energy_diag_short,
+            'frequency_bin_width_cycles_per_day': round(1.0 / n_valid, 7),
+            'effective_date_range': {
+                'start': str(x_short_valid.index.min().date()),
+                'end': str(x_short_valid.index.max().date())
+            },
+            'boundary_nans': {
+                'head_nans': int(x_short_raw.iloc[:20].isna().sum()),
+                'tail_nans': int(x_short_raw.iloc[-20:].isna().sum()),
+                'total_nans': int(x_short_raw.isna().sum())
+            },
+            'preprocessing': {
+                'method': 'centered_rolling_mean_subtraction',
+                'window_days': 30,
+                'center': True,
+                'boundary_handling': 'dropna_29_boundary_nans (15 leading NaNs, 14 trailing NaNs)',
+                'effective_sample_size': n_valid,
+                'filter_characteristic': 'suppresses low-frequency / longer-period variation and exhibits sinc-like frequency response; 30 days is not an ideal hard frequency cutoff',
+                'power_definition': 'spectral_mean_square_energy_not_automatically_equal_to_sample_variance',
+                'sample_mean_handling': 'valid short-term series is not re-mean-centered; empirical mean retained and computed at runtime'
+            }
+        }
 
         return {
             'success': True,
-            'dominant_periods': dominant_periods_return,
-            'all_dominant_periods': dominant_periods_int,  # Full list for reference
-            'all_periods': periods,
-            'magnitudes': positive_fft_magnitude,
-            'frequencies': positive_frequencies,
-            'detrended_series': detrended,
+            'fft_raw': fft_raw_results,
+            'fft_short_term': fft_short_results,
+            # Backward compatibility aliases
+            'dominant_periods': [p['period_days'] for p in dominant_peaks_short],
+            'detected_periods': [p['period_days'] for p in dominant_peaks_short],
+            'raw_dominant_periods': [p['period_days'] for p in dominant_peaks_raw],
             'parameters': {
-                'detrend_window': detrend_window,
                 'top_n': top_n,
-                'period_range': period_range,
-                'return_n_dominant': return_n_dominant
+                'raw_period_range': raw_period_range,
+                'short_term_period_range': short_term_period_range,
+                'detrend_window_fixed': 30
             }
         }
 
     def plot_spectrum(self,
-                     fft_results: Dict[str, Any],
-                     figsize: Tuple[int, int] = (15, 8),
-                     show_dominant: bool = True,
-                     max_period: int = 365,
-                     log_scale: bool = True,
-                     bar_chart_periods: Optional[int] = None,
-                     return_fig: bool = True) -> Optional[plt.Figure]:
-        """
-        Plot frequency spectrum with flexible dominant periods display.
-        
-        Args:
-            fft_results: Results from analyze_fft()
-            figsize: Figure size
-            show_dominant: Whether to highlight dominant periods
-            max_period: Maximum period to show
-            log_scale: Whether to use log scale for power
-            bar_chart_periods: Number of periods to show in bar chart (None = use all from results)
-            return_fig: If True, returns matplotlib Figure without calling plt.show()
-        """
-        if not fft_results['success']:
-            print("❌ Cannot plot spectrum: FFT analysis failed")
-            return None
-
+                      fft_results: Dict[str, Any],
+                      figsize: Tuple[int, int] = (16, 8),
+                      return_fig: bool = True) -> Optional[plt.Figure]:
+        """Trực quan hóa phổ tần số Dual FFT (2 panels đối chiếu)."""
         fig, axes = plt.subplots(1, 2, figsize=figsize)
-        fig.suptitle('Frequency Domain Analysis (FFT Spectrum)', fontsize=16, fontweight='bold')
+        fig.suptitle('Dual Frequency Domain Analysis (Power Spectrum via Periodogram)', fontsize=16, fontweight='bold')
 
-        periods = fft_results['all_periods']
-        magnitudes = fft_results['magnitudes']
-        dominant_periods = fft_results['dominant_periods']
+        raw_res = fft_results['fft_raw']
+        short_res = fft_results['fft_short_term']
 
-        # Determine how many periods to show in bar chart
-        if bar_chart_periods is None:
-            periods_to_show = dominant_periods
-            n_periods = len(dominant_periods)
-        else:
-            periods_to_show = dominant_periods[:bar_chart_periods]
-            n_periods = min(bar_chart_periods, len(dominant_periods))
-
-        # Filter by max_period
-        valid_idx = periods <= max_period
-        periods_plot = periods[valid_idx]
-        magnitudes_plot = magnitudes[valid_idx]
-
-        # Power Spectral Density
-        power = magnitudes_plot ** 2
-        if log_scale:
-            power = np.log10(power + 1e-12)
-            ylabel = 'Log Power Spectral Density'
-        else:
-            ylabel = 'Power Spectral Density'
-
-        axes[0].plot(periods_plot, power, 'b-', alpha=0.7, linewidth=1)
+        # Panel 1: Raw FFT Spectrum (Dải chu kỳ dài)
+        p_raw = raw_res['periods_positive']
+        pwr_raw = raw_res['power_positive']
+        axes[0].plot(p_raw, pwr_raw, color='darkblue', linewidth=1.2, label='One-Sided Power Spectrum')
+        axes[0].set_xlim(raw_res['parameters']['raw_period_range'][0] if 'parameters' in raw_res else 7, 730)
+        axes[0].set_title('Raw FFT Spectrum (Long-Period Structure & Annual Evidence)')
         axes[0].set_xlabel('Period (days)')
-        axes[0].set_ylabel(ylabel)
-        axes[0].set_title('Power Spectral Density')
+        axes[0].set_ylabel('Power (mm²)')
+        axes[0].axvline(x=365, color='crimson', linestyle='--', linewidth=1.5, label='Nominal Annual (365d)')
         axes[0].grid(True, alpha=0.3)
 
-        # Highlight dominant periods
-        if show_dominant:
-            for period in periods_to_show:
-                if period <= max_period:
-                    period_idx = np.argmin(np.abs(periods_plot - period))
-                    axes[0].axvline(x=period, color='red', linestyle='--', alpha=0.7)
-                    axes[0].text(period, power[period_idx], f'{period}d',
-                               rotation=90, verticalalignment='bottom',
-                               fontsize=9, ha='center')
+        # Highlight top 3 raw peaks
+        for p in raw_res['dominant_peaks'][:3]:
+            axes[0].plot(p['period_days'], p['power'], 'ro', markersize=6)
+            axes[0].annotate(f"{p['period_days']:.1f}d", (p['period_days'], p['power']),
+                             textcoords="offset points", xytext=(0, 6), ha='center', fontsize=9)
+        axes[0].legend(loc='upper right')
 
-        # Enhanced dominant periods bar chart
-        periods_power = []
-        for period in periods_to_show:
-            if period <= max_period:
-                period_idx = np.argmin(np.abs(periods_plot - period))
-                periods_power.append(power[period_idx])
-            else:
-                periods_power.append(0)
-
-        # Create bar chart with better formatting
-        x_positions = range(len(periods_to_show))
-        bars = axes[1].bar(x_positions, periods_power, alpha=0.7, 
-                          color=plt.cm.viridis(np.linspace(0, 1, len(periods_to_show))))
-        
-        axes[1].set_xlabel('Dominant Period Rank')
-        axes[1].set_ylabel(ylabel)
-        axes[1].set_title(f'Top {n_periods} Dominant Periods')
-        axes[1].set_xticks(x_positions)
-        axes[1].set_xticklabels([f'{p}d' for p in periods_to_show], 
-                               rotation=45 if n_periods > 8 else 0,
-                               ha='right' if n_periods > 8 else 'center')
+        # Panel 2: 30-Day Detrended Spectrum (Dải chu kỳ ngắn hạn trong tháng)
+        p_short = short_res['periods_positive']
+        pwr_short = short_res['power_positive']
+        axes[1].plot(p_short, pwr_short, color='teal', linewidth=1.2, label='30d-Detrended Power Spectrum')
+        axes[1].set_xlim(7, 100)  # Vẽ đến 100d để thấy rõ attenuation roll-off
+        axes[1].set_title('Short-Term FFT Spectrum (Intra-Monthly Diagnostic [7, 30]d)')
+        axes[1].set_xlabel('Period (days)')
+        axes[1].set_ylabel('Power (mm²)')
+        axes[1].axvline(x=30, color='gray', linestyle=':', linewidth=1.5, label='Moving Average Window (30d)')
         axes[1].grid(True, alpha=0.3)
 
-        # Add value labels on bars if not too many
-        if n_periods <= 15:
-            for i, (bar, period) in enumerate(zip(bars, periods_to_show)):
-                height = bar.get_height()
-                axes[1].text(bar.get_x() + bar.get_width()/2., height,
-                           f'{period}',
-                           ha='center', va='bottom', fontsize=8, fontweight='bold')
+        # Highlight top 3 short-term peaks trong [7, 30]
+        for p in short_res['dominant_peaks'][:3]:
+            axes[1].plot(p['period_days'], p['power'], 'go', markersize=6)
+            axes[1].annotate(f"{p['period_days']:.1f}d", (p['period_days'], p['power']),
+                             textcoords="offset points", xytext=(0, 6), ha='center', fontsize=9)
+        axes[1].legend(loc='upper right')
 
         fig.tight_layout()
         if not return_fig:
             plt.show()
             return None
         return fig
+
     # =============================================================================
-    # PAIR 3: MSTL DECOMPOSITION - PURE SEPARATION ✅
+    # PAIR 3: MSTL MULTI-SEASONAL DECOMPOSITION
     # =============================================================================
 
     def decompose_mstl(self,
-                      periods: List[int],
-                      # === MSTL-Specific Parameters ===
-                      windows: Optional[List[int]] = None,
-                      lmbda: Optional[float] = None,
-                      iterate: int = 2,
-                      # === STL Parameters (passed through stl_kwargs) ===
-                      **stl_kwargs) -> Dict[str, Any]:
-        """
-        ✅ SIMPLIFIED MSTL DECOMPOSITION: log1p when lmbda=None, Box-Cox otherwise
-        ✅ RETURNS RESIDUAL: For Stationarity analysis
-        ✅ AUTO-HANDLES ZEROS: log1p naturally handles zeros
+                       periods: Sequence[int] = (7, 30, 365),
+                       windows: Sequence[int] = (11, 15, 19),
+                       iterate: int = 2) -> Dict[str, Any]:
+        """Phân rã MSTL deterministic trên z_t = log1p(Y_t) với statsmodels 0.15.0.
         
         Args:
-            periods (List[int]): The period of each seasonal component
-                               (e.g., [7, 30, 365] for daily data with weekly, monthly, annual patterns)
-            
-            === MSTL-Specific Parameters ===
-            windows (Optional[List[int]]): The lengths of each seasonal smoother with respect to each period.
-                                         Must be odd. If None, default values from original paper are used.
-                                         Large values → less seasonal variability over time.
-            
-            lmbda (Optional[float]): Transformation parameter:
-                                   - None: Apply log1p transform (handles zeros naturally)
-                                   - "auto": Box-Cox auto-select lambda (with zero-handling)
-                                   - float: Box-Cox with specific lambda value
-            
-            iterate (int): Number of iterations to use to refine the seasonal component.
-                          Default = 2
+            periods: Tuple các chu kỳ mùa vụ, mặc định (7, 30, 365)
+            windows: Tuple độ dài bộ làm mượt LOESS cho từng mùa vụ, mặc định (11, 15, 19)
+            iterate: Số lượt lặp tinh chỉnh, mặc định 2
             
         Returns:
-            Dict containing MSTL decomposition results including residual
+            Dict chứa đầy đủ kết quả phân rã MSTL, thành phần phần dư resid (pd.Series)
+            và các tỷ số phương sai mô tả component_variance_ratio.
         """
-        print(f"📊 MSTL Decomposition")
-        print(f"   - Periods: {periods}")
-        print(f"   - Windows: {windows}")
-        print(f"   - Lambda: {lmbda}")
-        print(f"   - Iterations: {iterate}")
-        print(f"   - STL kwargs: {stl_kwargs}")
+        ts_data = self.df.set_index(self.date_col).sort_index()
+        target_ts = ts_data[self.target_col].dropna()
 
-        try:
-            from statsmodels.tsa.seasonal import MSTL
+        # Thang đo phân tích: z_t = log(1 + Y_t)
+        transformed_ts = np.log1p(target_ts)
 
-            # Prepare time series
-            ts_data = self.df.set_index(self.date_col).sort_index()
-            target_ts = ts_data[self.target_col].dropna()
+        # Khởi tạo và khớp mô hình MSTL
+        periods_list = list(periods)
+        windows_list = list(windows)
 
-            # Handle transformation based on lmbda value
-            if lmbda is None:
-                # Apply log1p transformation (handles zeros naturally)
-                print(f"   🔄 Applying log1p transformation (lmbda=None)")
-                transformed_ts = np.log1p(target_ts)
-                transform_method = 'log1p'
-                mstl_lmbda = None  # No additional Box-Cox in MSTL
-                
-            else:
-                # Use Box-Cox transformation within MSTL
-                print(f"   🔄 Using MSTL Box-Cox transformation (lmbda={lmbda})")
-                
-                # Check for zeros if using Box-Cox
-                zero_count = (target_ts == 0).sum()
-                if zero_count > 0:
-                    print(f"   📊 Zero values detected: {zero_count}")
-                    print(f"   ⚠️ Box-Cox requires positive data, zeros detected")
-                
-                transformed_ts = target_ts
-                transform_method = 'box_cox'
-                mstl_lmbda = lmbda
+        mstl = MSTL(
+            transformed_ts,
+            periods=periods_list,
+            windows=windows_list,
+            iterate=iterate
+        )
+        mstl_result = mstl.fit()
 
-            # First attempt: Try MSTL with transformed data
-            try:
-                mstl = MSTL(transformed_ts, 
-                           periods=periods,
-                           windows=windows,
-                           lmbda=mstl_lmbda,  # Only use Box-Cox if not log1p
-                           iterate=iterate,
-                           stl_kwargs=stl_kwargs)
-                
-                mstl_result = mstl.fit()
-                
-                print(f"   ✅ MSTL decomposition completed successfully")
-                print(f"   📊 Transform method: {transform_method}")
-                print(f"   📊 Components extracted: trend, seasonal, residual")
-                print(f"   📤 Residual component available for Stationarity analysis")
+        # Khóa cứng bất biến căn chỉnh index
+        assert mstl_result.resid.index.equals(transformed_ts.index), (
+            "MSTL resid index does not strictly equal input series DatetimeIndex."
+        )
 
-                return {
-                    'success': True,
-                    'mstl_obj': mstl_result,
-                    'original_ts': target_ts,
-                    'transformed_ts': transformed_ts,
-                    'transform_method': transform_method,
-                    'adjusted_ts': None,  # No adjustment needed
-                    'epsilon_added': None,
-                    'periods': periods,
-                    'windows': windows,
-                    'lmbda': lmbda,
-                    'mstl_lmbda': mstl_lmbda,
-                    'iterate': iterate,
-                    'stl_kwargs': stl_kwargs,
-                    'trend': mstl_result.trend,
-                    'seasonal': mstl_result.seasonal,
-                    'resid': mstl_result.resid,
-                }
-                
-            except Exception as first_error:
-                # Check if this is a Box-Cox related error and if we can apply fallback
-                if (transform_method == 'box_cox' and lmbda == "auto" and 
-                    ("positive" in str(first_error).lower() or 
-                     "must be positive" in str(first_error).lower())):
-                    
-                    print(f"   🔧 Box-Cox failed with original data: {first_error}")
-                    print(f"   🚀 Applying auto-fallback: Adding epsilon to zeros")
-                    
-                    # Apply fallback mechanism
-                    epsilon = 1e-8  # Very small constant
-                    zero_mask = target_ts == 0
-                    adjusted_ts = target_ts.copy()
-                    adjusted_ts[zero_mask] = epsilon
-                    
-                    zeros_adjusted = zero_mask.sum()
-                    print(f"   📊 Adjusted {zeros_adjusted} zero values with epsilon={epsilon}")
-                    
-                    try:
-                        # Retry MSTL with adjusted data
-                        mstl_adjusted = MSTL(adjusted_ts, 
-                                           periods=periods,
-                                           windows=windows,
-                                           lmbda=lmbda,
-                                           iterate=iterate,
-                                           stl_kwargs=stl_kwargs)
-                        
-                        mstl_result = mstl_adjusted.fit()
-                        
-                        print(f"   ✅ MSTL decomposition completed with adjusted data")
-                        print(f"   📊 Transform method: {transform_method} (with epsilon)")
-                        print(f"   📊 Components extracted: trend, seasonal, residual")
-                        print(f"   ⚠️ Note: {zeros_adjusted} zero values adjusted with epsilon={epsilon}")
-                        print(f"   📤 Residual component available for Stationarity analysis")
+        # Tính toán chỉ số phương sai mô tả (Relative Component Variance)
+        total_var = float(np.var(transformed_ts.values, ddof=0))
+        trend_var = float(np.var(mstl_result.trend.values, ddof=0))
+        resid_var = float(np.var(mstl_result.resid.values, ddof=0))
 
-                        return {
-                            'success': True,
-                            'mstl_obj': mstl_result,
-                            'original_ts': target_ts,
-                            'transformed_ts': adjusted_ts,
-                            'transform_method': f'{transform_method}_epsilon',
-                            'adjusted_ts': adjusted_ts,
-                            'epsilon_added': epsilon,
-                            'zeros_adjusted': zeros_adjusted,
-                            'periods': periods,
-                            'windows': windows,
-                            'lmbda': lmbda,
-                            'mstl_lmbda': lmbda,
-                            'iterate': iterate,
-                            'stl_kwargs': stl_kwargs,
-                            'trend': mstl_result.trend,
-                            'seasonal': mstl_result.seasonal,
-                            'resid': mstl_result.resid,
-                            'fallback_used': True
-                        }
-                        
-                    except Exception as second_error:
-                        print(f"   ❌ MSTL failed even after adjustment: {second_error}")
-                        raise second_error
-                else:
-                    # Not a Box-Cox zero error, re-raise original error
-                    raise first_error
+        comp_variance_ratios = {
+            'trend': round(trend_var / total_var, 4) if total_var > 0 else 0.0,
+            'residual': round(resid_var / total_var, 4) if total_var > 0 else 0.0,
+        }
 
-        except Exception as e:
-            print(f"   ⚠️ MSTL decomposition failed: {e}")
-            return {
-                'success': False,
-                'error': str(e),
-                'periods': periods,
-                'windows': windows,
-                'lmbda': lmbda,
-                'transform_method': transform_method if 'transform_method' in locals() else 'unknown'
+        # Tính tỷ số phương sai cho từng thành phần mùa vụ
+        seasonal_df = mstl_result.seasonal
+        for col in seasonal_df.columns:
+            s_var = float(np.var(seasonal_df[col].values, ddof=0))
+            comp_variance_ratios[col] = round(s_var / total_var, 4) if total_var > 0 else 0.0
+
+        period_semantic_labels = {
+            '7': 'weekly / calendar-scale seasonality',
+            '30': '30-day sub-seasonal / intra-month recurring component (not MJO)',
+            '365': 'annual-scale macro seasonality'
+        }
+
+        return {
+            'success': True,
+            'mstl_obj': mstl_result,
+            'original_ts': target_ts,
+            'transformed_ts': transformed_ts,
+            'transform_method': 'log1p',
+            'periods': periods_list,
+            'windows': windows_list,
+            'requested_windows': windows_list,
+            'resolved_windows': windows_list,
+            'iterate': iterate,
+            'trend': mstl_result.trend,
+            'seasonal': mstl_result.seasonal,
+            'resid': mstl_result.resid,
+            'component_variance_ratios': comp_variance_ratios,
+            'variance_ratios': comp_variance_ratios,
+            'period_semantic_labels': period_semantic_labels,
+            'variance_diagnostics': {
+                'diagnostic_type': 'relative_component_variance_descriptive',
+                'interpretation_note': 'Ratios indicate marginal relative dispersion Var(C)/Var(z); components are non-orthogonal, so ratios do not represent orthogonal variance attribution and do not necessarily sum to 100% due to cross-component covariances.',
+                'total_variance': round(total_var, 6),
+                'component_variance_ratios': comp_variance_ratios
             }
+        }
 
     def plot_decomposition(self,
-                          mstl_results: Dict[str, Any],
-                          figsize: Tuple[int, int] = (15, 12),
-                          show_components: List[str] = ['trend', 'seasonal', 'resid'],
-                          original_scale: bool = True,
-                          return_fig: bool = True) -> Optional[plt.Figure]:
-        """
-        Plot MSTL decomposition results (trend, seasonal, residual).
-        
-        Args:
-            mstl_results: Results from decompose_mstl()
-            figsize: Figure size
-            show_components: Components to show
-            original_scale: Whether to convert back to original scale
-            return_fig: If True, returns matplotlib Figure without calling plt.show()
-        """
-        if not mstl_results['success']:
-            print("❌ Cannot plot decomposition: MSTL failed")
-            return None
+                           mstl_results: Dict[str, Any],
+                           figsize: Tuple[int, int] = (15, 12),
+                           return_fig: bool = True) -> Optional[plt.Figure]:
+        """Trực quan hóa phân rã MSTL đa tầng (6 panels chuẩn mực)."""
+        transformed_ts = mstl_results['transformed_ts']
+        trend = mstl_results['trend']
+        seasonal = mstl_results['seasonal']
+        resid = mstl_results['resid']
 
-        transform_method = mstl_results.get('transform_method', 'unknown')
-        n_plots = 1 + len(show_components)  # Original + components
+        fig, axes = plt.subplots(6, 1, figsize=figsize, sharex=True)
+        fig.suptitle('MSTL Multi-Seasonal Decomposition on log1p(Y_t)', fontsize=16, fontweight='bold')
 
-        fig, axes = plt.subplots(n_plots, 1, figsize=figsize)
-        if n_plots == 1:
-            axes = [axes]
-
-        fig.suptitle(f'MSTL Multi-Seasonal Decomposition ({transform_method})', 
-                    fontsize=16, fontweight='bold')
-
-        plot_idx = 0
-
-        # Original series
-        original_data = mstl_results['original_ts']
-        if original_scale and transform_method == 'log1p':
-            axes[plot_idx].plot(original_data.index, original_data.values, 'b-', linewidth=1)
-            axes[plot_idx].set_title('Original Data (Original Scale)')
-            axes[plot_idx].set_ylabel('Precipitation (mm)')
-        elif original_scale and 'box_cox' in transform_method:
-            axes[plot_idx].plot(original_data.index, original_data.values, 'b-', linewidth=1)
-            axes[plot_idx].set_title('Original Data (Original Scale)')
-            axes[plot_idx].set_ylabel('Precipitation (mm)')
-        else:
-            transformed_data = mstl_results['transformed_ts']
-            axes[plot_idx].plot(transformed_data.index, transformed_data.values, 'b-', linewidth=1)
-            axes[plot_idx].set_title(f'Original Data ({transform_method} scale)')
-            axes[plot_idx].set_ylabel(f'{transform_method} Precipitation')
-        
-        axes[plot_idx].grid(True, alpha=0.3)
-        plot_idx += 1
-
-        # Trend component
-        if 'trend' in show_components:
-            trend = mstl_results['trend']
-            axes[plot_idx].plot(trend.index, trend.values, 'g-', linewidth=2)
-            axes[plot_idx].set_title('Trend Component')
-            axes[plot_idx].set_ylabel(f'{transform_method} Trend')
-            axes[plot_idx].grid(True, alpha=0.3)
-            plot_idx += 1
-
-        # Seasonal component
-        if 'seasonal' in show_components:
-            seasonal = mstl_results['seasonal']
-            axes[plot_idx].plot(seasonal.index, seasonal.values, 'r-', linewidth=1)
-            axes[plot_idx].set_title('Combined Seasonal Component')
-            axes[plot_idx].set_ylabel(f'{transform_method} Seasonal')
-            axes[plot_idx].grid(True, alpha=0.3)
-            plot_idx += 1
-
-        # Residual component
-        if 'resid' in show_components:
-            resid = mstl_results['resid']
-            axes[plot_idx].plot(resid.index, resid.values, 'purple', linewidth=1, alpha=0.7)
-            axes[plot_idx].axhline(y=0, color='black', linestyle='--', alpha=0.5)
-            axes[plot_idx].set_title('Residual Component (Stationarity Diagnostics Input)')
-            axes[plot_idx].set_ylabel(f'{transform_method} Residual')
-            axes[plot_idx].grid(True, alpha=0.3)
-            axes[-1].set_xlabel('Date')
-        
-        fig.tight_layout()
-        if not return_fig:
-            plt.show()
-            return None
-        return fig
-
-    # =============================================================================
-    # PAIR 4: WAVELET ANALYSIS - PURE SEPARATION ✅
-    # =============================================================================
-
-    def analyze_wavelet(self,
-                       wavelet_name: str = 'morl',
-                       scales: Optional[np.ndarray] = None,
-                       analysis_duration_years: int = 3,
-                       period_range: Tuple[int, int] = (3, 365)) -> Dict[str, Any]:
-        """
-        Wavelet-based time-frequency analysis (Continuous Wavelet Transform).
-        
-        .. note:: Wavelet Methodology & Detected Periods (Technical Note)
-        
-           Unlike FFT which is computed on the entire training series with a
-           30-day centered moving average detrending (attenuating signals >= 30d),
-           Wavelet analysis:
-           1. Operates on the most recent ``analysis_duration_years`` (default 3 years)
-              to capture localized, non-stationary time-frequency features.
-           2. Uses raw precipitation without 30-day moving average detrending,
-              allowing the Morlet wavelet to detect longer periodic structures such as
-              ~175-182 days.
-           3. Tracks how spectral power evolves across time in the scalogram.
-        
-        Args:
-            wavelet_name: Wavelet to use ('morl', 'cmor', 'gaus')
-            scales: Custom scales array (if None, auto-generated)
-            analysis_duration_years: Years of recent data to analyze (default 3)
-            period_range: Period range for scale generation (min_days, max_days)
-            
-        Returns:
-            Dict containing wavelet analysis results
-        """
-        print(f"🌊 Wavelet Analysis")
-        print(f"   - Wavelet: {wavelet_name}")
-        print(f"   - Analysis duration: {analysis_duration_years} years")
-        print(f"   - Period range: {period_range}")
-
-        try:
-            import pywt
-
-            # Prepare time series data
-            ts_data = self.df.set_index(self.date_col).sort_index()
-            target_ts = ts_data[self.target_col].dropna()
-
-            # Limit analysis to recent years for performance
-            analysis_duration_days = 365 * analysis_duration_years
-            if len(target_ts) > analysis_duration_days:
-                target_ts = target_ts.tail(analysis_duration_days)
-                print(f"   📊 Using last {analysis_duration_years} years ({len(target_ts)} days)")
-
-            data = target_ts.values
-            dates = target_ts.index
-
-            # Generate scales if not provided
-            if scales is None:
-                # Convert period range to scale range
-                min_scale = max(1, period_range[0] // 2)
-                max_scale = min(200, period_range[1] // 2)
-                scales = np.arange(min_scale, max_scale, 2)
-                print(f"   🎚️ Generated {len(scales)} scales: {min_scale} to {max_scale}")
-
-            # Perform Continuous Wavelet Transform
-            print(f"   🔄 Running CWT with {wavelet_name} wavelet...")
-            coefficients, frequencies = pywt.cwt(data, scales, wavelet_name)
-
-            # Convert frequencies to periods
-            if wavelet_name == 'morl':
-                # For Morlet wavelet, center frequency is approximately 1
-                periods = scales / 1.0
-            else:
-                # General case
-                periods = 1 / frequencies
-
-            # Calculate power (magnitude squared)
-            power = np.abs(coefficients) ** 2
-
-            # Global wavelet spectrum (time-averaged)
-            global_power = np.mean(power, axis=1)
-
-            # Find dominant periods from wavelet analysis
-            peak_indices = np.argsort(global_power)[-10:]  # Top 10
-            dominant_periods_wav = periods[peak_indices]
-            
-            # Filter by period range
-            valid_periods = dominant_periods_wav[
-                (dominant_periods_wav >= period_range[0]) & 
-                (dominant_periods_wav <= period_range[1])
-            ]
-
-            print(f"   📊 Found {len(valid_periods)} dominant wavelet periods:")
-            for period in sorted(valid_periods, reverse=True)[:5]:  # Show top 5
-                print(f"      - {period:.1f} days")
-
-            return {
-                'success': True,
-                'coefficients': coefficients,
-                'power': power,
-                'periods': periods,
-                'scales': scales,
-                'frequencies': frequencies,
-                'global_power': global_power,
-                'dominant_periods': sorted(valid_periods, reverse=True),
-                'dates': dates,
-                'data': data,
-                'parameters': {
-                    'wavelet_name': wavelet_name,
-                    'analysis_duration_years': analysis_duration_years,
-                    'period_range': period_range,
-                    'n_scales': len(scales)
-                }
-            }
-
-        except ImportError:
-            print(f"   ⚠️ PyWavelets not available, trying scipy fallback...")
-            return self._analyze_wavelet_scipy_fallback(analysis_duration_years, period_range)
-        except Exception as e:
-            print(f"   ❌ Wavelet analysis failed: {e}")
-            return {
-                'success': False,
-                'error': str(e),
-                'parameters': {
-                    'wavelet_name': wavelet_name,
-                    'analysis_duration_years': analysis_duration_years,
-                    'period_range': period_range
-                }
-            }
-
-    def _analyze_wavelet_scipy_fallback(self, 
-                                       analysis_duration_years: int,
-                                       period_range: Tuple[int, int]) -> Dict[str, Any]:
-        """
-        Fallback wavelet analysis using scipy.signal
-        """
-        try:
-            from scipy.signal import cwt, morlet2
-
-            print(f"   🔄 Using scipy.signal CWT fallback...")
-            
-            # Prepare simplified time series
-            ts_data = self.df.set_index(self.date_col).sort_index()
-            target_ts = ts_data[self.target_col].dropna()
-
-            # Use last year only for scipy fallback
-            target_ts = target_ts.tail(365)
-            data = target_ts.values
-            dates = target_ts.index
-
-            # Simplified scales
-            scales = np.logspace(1, 2, 20)  # 20 scales from 10 to 100
-
-            # Perform CWT
-            coefficients = cwt(data, morlet2, scales)
-            power = np.abs(coefficients) ** 2
-            
-            # Approximate periods
-            periods = scales * 2  # Rough approximation
-
-            print(f"   ✅ Scipy fallback completed")
-
-            return {
-                'success': True,
-                'coefficients': coefficients,
-                'power': power,
-                'periods': periods,
-                'scales': scales,
-                'global_power': np.mean(power, axis=1),
-                'dominant_periods': [],
-                'dates': dates,
-                'data': data,
-                'parameters': {
-                    'wavelet_name': 'morlet2_scipy',
-                    'analysis_duration_years': 1,  # Limited to 1 year
-                    'period_range': period_range,
-                    'fallback': True
-                }
-            }
-
-        except Exception as e:
-            print(f"   ❌ Scipy fallback also failed: {e}")
-            return {
-                'success': False,
-                'error': f'Both PyWavelets and scipy failed: {str(e)}',
-                'parameters': {'fallback_attempted': True}
-            }
-
-    def plot_scalogram(self,
-                      wavelet_results: Dict[str, Any],
-                      figsize: Tuple[int, int] = (15, 10),
-                      cmap: str = 'jet',
-                      show_coi: bool = True,
-                      log_scale: bool = True,
-                      return_fig: bool = True) -> Optional[plt.Figure]:
-        """
-        Plot wavelet scalogram (time-frequency power spectrum) and global spectrum.
-        
-        Args:
-            wavelet_results: Results from analyze_wavelet()
-            figsize: Figure size
-            cmap: Colormap for scalogram
-            show_coi: Whether to show cone of influence
-            log_scale: Whether to use log scale for power
-            return_fig: If True, returns matplotlib Figure without calling plt.show()
-        """
-        if not wavelet_results['success']:
-            print("❌ Cannot plot scalogram: Wavelet analysis failed")
-            return None
-
-        power = wavelet_results['power']
-        periods = wavelet_results['periods']
-        dates = wavelet_results['dates']
-        data = wavelet_results['data']
-        params = wavelet_results['parameters']
-
-        fig, axes = plt.subplots(3, 1, figsize=figsize)
-        fig.suptitle(f'Wavelet Time-Frequency Analysis ({params["wavelet_name"]} Wavelet)', 
-                    fontsize=16, fontweight='bold')
-
-        # 1. Original time series
-        axes[0].plot(dates, data, 'b-', linewidth=1.5, alpha=0.8)
-        axes[0].set_title('Original Time Series')
-        axes[0].set_ylabel('Precipitation (mm)')
+        # 1. Chuỗi biến đổi gốc
+        axes[0].plot(transformed_ts.index, transformed_ts.values, color='black', linewidth=1.0)
+        axes[0].set_ylabel('log1p(Rain)')
+        axes[0].set_title('Observed Series: log1p(Y_t)')
         axes[0].grid(True, alpha=0.3)
 
-        # 2. Wavelet power spectrum (scalogram)
-        dates_num = np.arange(len(dates))
-        T, P = np.meshgrid(dates_num, periods)
+        # 2. Xu thế (Trend)
+        axes[1].plot(trend.index, trend.values, color='darkorange', linewidth=1.5)
+        axes[1].set_ylabel('Trend')
+        axes[1].set_title('Trend Component')
+        axes[1].grid(True, alpha=0.3)
 
-        if log_scale:
-            power_plot = np.log10(power + 1e-12)
-            power_label = 'Log₁₀ Power'
-        else:
-            power_plot = power
-            power_label = 'Power'
-
-        im = axes[1].contourf(T, P, power_plot, levels=30, cmap=cmap)
-        axes[1].set_ylabel('Period (days)')
-        axes[1].set_title('Wavelet Power Spectrum (Scalogram)')
-        
-        # Set y-axis to log scale for better period visualization
-        axes[1].set_yscale('log')
-        axes[1].set_ylim(periods.min(), periods.max())
-
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=axes[1])
-        cbar.set_label(power_label)
-
-        # 3. Global wavelet spectrum
-        if 'global_power' in wavelet_results:
-            global_power = wavelet_results['global_power']
-            
-            if log_scale:
-                global_power_plot = np.log10(global_power + 1e-12)
-            else:
-                global_power_plot = global_power
-
-            axes[2].plot(global_power_plot, periods, 'r-', linewidth=2)
-            axes[2].set_xlabel(power_label)
-            axes[2].set_ylabel('Period (days)')
-            axes[2].set_title('Global Wavelet Spectrum')
-            axes[2].set_yscale('log')
-            axes[2].set_ylim(periods.min(), periods.max())
+        # 3. Mùa vụ tuần (Seasonal 7)
+        if 'seasonal_7' in seasonal.columns:
+            axes[2].plot(seasonal.index, seasonal['seasonal_7'].values, color='royalblue', linewidth=1.0)
+            axes[2].set_ylabel('Seasonal 7d')
+            axes[2].set_title('Weekly Seasonality (s=7)')
             axes[2].grid(True, alpha=0.3)
 
-            # Highlight dominant periods
-            if 'dominant_periods' in wavelet_results:
-                dominant_periods = wavelet_results['dominant_periods']
-                for period in dominant_periods[:5]:  # Top 5
-                    if period >= periods.min() and period <= periods.max():
-                        axes[2].axhline(y=period, color='blue', linestyle='--', alpha=0.7)
-                        axes[2].text(global_power_plot.max() * 0.7, period, 
-                                   f'{period:.1f}d', verticalalignment='bottom')
+        # 4. Dao động tháng (Seasonal 30)
+        if 'seasonal_30' in seasonal.columns:
+            axes[3].plot(seasonal.index, seasonal['seasonal_30'].values, color='mediumseagreen', linewidth=1.0)
+            axes[3].set_ylabel('Seasonal 30d')
+            axes[3].set_title('Sub-Seasonal / Intra-Month Component (s=30, not MJO)')
+            axes[3].grid(True, alpha=0.3)
 
-        # Format x-axis with dates for scalogram
-        n_ticks = min(6, len(dates))
-        tick_indices = np.linspace(0, len(dates)-1, n_ticks, dtype=int)
-        axes[1].set_xticks(tick_indices)
-        axes[1].set_xticklabels([dates[i].strftime('%Y-%m') for i in tick_indices], 
-                               rotation=45)
-        axes[1].set_xlabel('Date')
+        # 5. Mùa vụ năm (Seasonal 365)
+        if 'seasonal_365' in seasonal.columns:
+            axes[4].plot(seasonal.index, seasonal['seasonal_365'].values, color='purple', linewidth=1.2)
+            axes[4].set_ylabel('Seasonal 365d')
+            axes[4].set_title('Annual Macro Seasonality (s=365)')
+            axes[4].grid(True, alpha=0.3)
 
-        # Same for original time series
-        axes[0].set_xticks(tick_indices)
-        axes[0].set_xticklabels([dates[i].strftime('%Y-%m') for i in tick_indices], 
-                               rotation=45)
+        # 6. Phần dư (Residual)
+        axes[5].plot(resid.index, resid.values, color='crimson', linewidth=0.8, alpha=0.8)
+        axes[5].set_ylabel('Residual')
+        axes[5].set_title('Residual Component (for 01.5 Stationarity Diagnostics)')
+        axes[5].grid(True, alpha=0.3)
 
         fig.tight_layout()
         if not return_fig:
@@ -930,179 +639,54 @@ class TemporalStructureAnalyzer:
             return None
         return fig
 
-        # Print analysis summary
-        print(f"\n🌊 Wavelet Analysis Summary:")
-        print(f"   - Wavelet: {params['wavelet_name']}")
-        print(f"   - Data points: {len(data):,}")
-        print(f"   - Period range: {periods.min():.1f} - {periods.max():.1f} days")
-        print(f"   - Number of scales: {len(periods)}")
-        
-        if 'dominant_periods' in wavelet_results and wavelet_results['dominant_periods']:
-            print(f"   - Top dominant periods:")
-            for i, period in enumerate(wavelet_results['dominant_periods'][:3], 1):
-                print(f"     {i}. {period:.1f} days")
-
     # =============================================================================
-    # MAIN ORCHESTRATION - CONVENIENCE METHODS (UPDATED - NO RESIDUAL ANALYSIS)
+    # ORCHESTRATION & COMPATIBILITY
     # =============================================================================
 
     def analyze_all(self) -> Dict[str, Any]:
-        """
-        Convenience method: Run all analyses with default parameters.
-        
-        .. note:: Period selection for MSTL
-        
-           When called standalone, this method uses **FFT-detected** dominant
-           periods (top 3 by magnitude) for MSTL decomposition (line below:
-           ``fft_results.get('dominant_periods', ...)``).  This is data-driven
-           but may capture noise — rainfall FFT spectra are much noisier than
-           e.g. temperature.
-           
-           When called via ``EDAPipeline`` with ``period_selection='domain'``,
-           the pipeline overrides these periods with climatologically-motivated
-           values (e.g. ``[7, 30, 122, 365]``).  See ``EDAPipeline`` docstring.
-           
-           The fallback ``[7, 30, 365]`` represents: weekly cycle, MJO (~30d),
-           annual monsoon.
-        
-        Returns:
-            Dict containing all analysis results + residual for Stationarity
-        """
-        print("\n" + "="*70)
-        print("🕐 TEMPORAL STRUCTURE ANALYSIS - 4 PAIRS REFACTORED")
-        print("="*70)
-
-        # Step 1: Seasonal patterns analysis
+        """Điều phối chạy toàn bộ 3 phân tích: Seasonal, Dual FFT, và MSTL."""
         seasonal_results = self.analyze_seasonal_patterns()
-
-        # Step 2: FFT frequency analysis
         fft_results = self.analyze_fft()
+        mstl_results = self.decompose_mstl()
 
-        # Step 3: MSTL decomposition (returns residual for Stationarity)
-        # NOTE: periods here come from FFT, not domain knowledge.
-        # See EDAPipeline.period_selection for the domain-knowledge alternative.
-        periods = fft_results.get('dominant_periods', [7, 30, 365])[:3]
-        mstl_results = self.decompose_mstl(periods)
-
-        # Step 4: Wavelet analysis
-        wavelet_results = self.analyze_wavelet()
-
-        # Combine all results
         results = {
             'seasonal_patterns': seasonal_results,
             'seasonal': seasonal_results,
+            'wet_season_months': seasonal_results['wet_months'],
+            'dry_season_months': seasonal_results['dry_months'],
             'frequency_analysis': fft_results,
             'fft': fft_results,
-            'mstl_decomposition': mstl_results,  # ✅ Contains residual for Stationarity
+            'mstl_decomposition': mstl_results,
             'mstl': mstl_results,
-            'wavelet_analysis': wavelet_results,
-            'wavelet': wavelet_results,
-            'component_name': 'TemporalStructureAnalyzer_4Pairs_NoResidualAnalysis'
+            'component_name': 'TemporalStructureAnalyzer_DualFFT_MSTL'
         }
-
-        print(f"\n✅ TEMPORAL ANALYSIS COMPLETED - 4 PAIRS IMPLEMENTED")
-        print(f"   📤 MSTL residual ready for Stationarity analysis")
         return results
 
     def analyze(self) -> Dict[str, Any]:
-        """Run complete temporal structure analysis suite (standard analyzer protocol)."""
+        """Standard analyzer protocol alias."""
         return self.analyze_all()
-
-    def plot_mstl_decomposition(self, mstl_results: Optional[Dict[str, Any]] = None,
-                                figsize: Tuple[int, int] = (15, 12),
-                                return_fig: bool = True) -> Optional[plt.Figure]:
-        """Plot MSTL multi-seasonal decomposition."""
-        if mstl_results is None:
-            mstl_results = self.decompose_mstl([7, 30, 365])
-        return self.plot_decomposition(mstl_results, figsize=figsize, return_fig=return_fig)
-
-    def plot_wavelet_scalogram(self, wavelet_results: Optional[Dict[str, Any]] = None,
-                               figsize: Tuple[int, int] = (15, 10),
-                               return_fig: bool = True) -> Optional[plt.Figure]:
-        """Plot Wavelet scalogram (time-frequency spectrum)."""
-        if wavelet_results is None:
-            wavelet_results = self.analyze_wavelet()
-        return self.plot_scalogram(wavelet_results, figsize=figsize, return_fig=return_fig)
-
-    def plot_fft_spectrum(self, fft_results: Optional[Dict[str, Any]] = None,
-                          figsize: Tuple[int, int] = (15, 8),
-                          return_fig: bool = True) -> Optional[plt.Figure]:
-        """Plot FFT frequency spectrum."""
-        if fft_results is None:
-            fft_results = self.analyze_fft()
-        return self.plot_spectrum(fft_results, figsize=figsize, return_fig=return_fig)
-
-    def visualize_all(self, results: Dict[str, Any]) -> None:
-        """
-        Convenience method: Visualize all components
-        ✅ UPDATED: No residual diagnostics visualization
-        
-        Args:
-            results: Results from analyze_all()
-        """
-        print("\n🎨 Visualizing All Components...")
-
-        # 1. Seasonal patterns
-        self.plot_seasonal_patterns(results['seasonal_patterns'])
-
-        # 2. Frequency spectrum  
-        if results['frequency_analysis']['success']:
-            self.plot_spectrum(results['frequency_analysis'])
-
-        # 3. MSTL decomposition (shows residual for reference)
-        if results['mstl_decomposition']['success']:
-            self.plot_decomposition(results['mstl_decomposition'])
-
-        # 4. Wavelet scalogram
-        if results['wavelet_analysis']['success']:
-            self.plot_scalogram(results['wavelet_analysis'])
-
-        print(f"\n📋 Note: Residual analysis is now handled by StationarityAutocorrelationAnalyzer")
 
 
 # =============================================================================
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
-def analyze_temporal_structure(df: pd.DataFrame, 
-                              target_col: str = None, 
-                              date_col: str = None) -> Dict[str, Any]:
-    """
-    Convenience function for complete temporal analysis
-    ✅ UPDATED: Returns residual for Stationarity analysis
-    
-    Args:
-        df: DataFrame with time series data
-        target_col: Target column name
-        date_col: Date column name
-        
-    Returns:
-        Dict containing all analysis results including residual for Stationarity
-    """
+def analyze_temporal_structure(df: pd.DataFrame,
+                               target_col: Optional[str] = None,
+                               date_col: Optional[str] = None) -> Dict[str, Any]:
+    """Hàm tiện ích chạy toàn bộ khảo sát cấu trúc thời gian."""
     analyzer = TemporalStructureAnalyzer(df, target_col, date_col)
     return analyzer.analyze_all()
 
+
 def get_mstl_residual_for_stationarity(df: pd.DataFrame,
-                                      target_col: str = None,
-                                      date_col: str = None,
-                                      periods: List[int] = [7, 30, 365]) -> Optional[pd.Series]:
-    """
-    Convenience function to get MSTL residual for Stationarity analysis
-    
-    Args:
-        df: DataFrame with time series data
-        target_col: Target column name
-        date_col: Date column name
-        periods: Seasonal periods for MSTL
-        
-    Returns:
-        MSTL residual series or None if failed
-    """
+                                       target_col: Optional[str] = None,
+                                       date_col: Optional[str] = None,
+                                       periods: Sequence[int] = (7, 30, 365),
+                                       windows: Sequence[int] = (11, 15, 19)) -> Optional[pd.Series]:
+    """Hàm tiện ích trích xuất chuỗi phần dư MSTL cho phân tích tính dừng của 01.5."""
     analyzer = TemporalStructureAnalyzer(df, target_col, date_col)
-    mstl_results = analyzer.decompose_mstl(periods)
-    
-    if mstl_results['success']:
-        return mstl_results['resid']
-    else:
-        print(f"⚠️ MSTL decomposition failed: {mstl_results.get('error', 'Unknown error')}")
-        return None
+    mstl_res = analyzer.decompose_mstl(periods=periods, windows=windows)
+    if mstl_res.get('success', False):
+        return mstl_res['resid']
+    return None

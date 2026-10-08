@@ -239,50 +239,111 @@ def compare_rain_thresholds(
     df: pd.DataFrame,
     target_col: Optional[str] = None,
     candidate_thresholds: Optional[List[float]] = None,
+    inclusive_wet: bool = True,
 ) -> pd.DataFrame:
     """Compute empirical distribution statistics across candidate rain thresholds.
 
-    Returns a DataFrame comparing threshold values, counts, cumulative percentages,
-    and incremental percentage gaps. Does NOT pick a default threshold or prescribe conclusions.
+    Empirically describes rainfall occurrence, class balance, and conditional intensity
+    across candidate thresholds without selecting or freezing any threshold in EDA.
+
+    Architectural boundaries:
+        - Primary forecasting target: continuous daily rainfall amount Y_t (mm).
+          Statistical, ML, Tweedie, and Neural models forecast continuous Y_t directly,
+          fully independent of any rainfall threshold.
+        - Threshold tau is auxiliary with only two downstream uses:
+          1. Descriptive sensitivity analysis in EDA (characterizing occurrence structure).
+          2. Two-stage Hurdle decomposition (Stage 1 occurrence & Stage 2 conditional amount).
+        - Canonical project wet-day convention:
+          Wet day is defined as Y >= 1.0 mm/day (WMO RR1 standard), and dry day as Y < 1.0 mm/day.
+          This definition is unified across 01.1 threshold analysis, 01.2 intermittency,
+          Hurdle Stage 1 occurrence, and secondary rain-day diagnostics.
+        - Feature Engineering: No mandatory threshold-derived features (is_wet, wet_lag, etc.)
+          in baseline levels F0-F3.
+        - Metrics: Primary metrics (MAE, RMSE, CR-MAE@7) remain threshold-independent.
+          Rain-day metrics (RainDay-MAE_tau) are secondary diagnostics.
+        - Nomenclature: Observations in 0 < Y <= 0.1 mm represent a 'near-zero / very-light
+          precipitation regime' rather than an unverified label like sensor noise or dew.
+        - Notation distinction:
+          * Rainfall threshold (tau): physical rainfall event definition (e.g. tau = 1.0 mm/day).
+          * Classification threshold (c): Stage 1 probability cutoff (P(Wet | X) > c).
 
     Args:
         df: DataFrame containing the target variable.
         target_col: Target column name.
-        candidate_thresholds: List of thresholds in mm (default [0.0, 0.1, 0.6, 1.0]).
+        candidate_thresholds: Configurable list of thresholds in mm
+            (default [0.0, 0.1, 0.5, 1.0, 2.0, 5.0]).
+        inclusive_wet: If True (default), defines Wet as Y >= tau (and Dry as Y < tau for tau > 0,
+            or Y == 0 for tau = 0.0), aligning with project canonical wet-day convention.
+            If False, defines No-Rain as Y <= tau and Rain as Y > tau.
 
     Returns:
-        pd.DataFrame with columns ['threshold_mm', 'condition', 'days_count', 'pct_of_total', 'incremental_gap_pct']
+        pd.DataFrame with columns:
+            ['threshold_mm', 'no_rain_condition', 'no_rain_days', 'rain_days',
+             'no_rain_pct', 'rain_pct', 'exact_threshold_days', 'incremental_gap_pct',
+             'rain_mean_conditional', 'rain_median_conditional']
     """
     col = resolve_target_col(target_col)
     target = df[col].dropna()
     total_days = len(target)
 
     if candidate_thresholds is None:
-        candidate_thresholds = [0.0, 0.1, 0.6, 1.0]
+        candidate_thresholds = [0.0, 0.1, 0.5, 1.0, 2.0, 5.0]
 
-    candidate_thresholds = sorted(list(candidate_thresholds))
+    candidate_thresholds = sorted(list(set(candidate_thresholds)))
     records = []
-    prev_frac = None
+    prev_no_rain_frac = None
+
     for th in candidate_thresholds:
-        if th == 0.0:
-            count = int((target == 0.0).sum())
-            frac = float(count / total_days) if total_days > 0 else 0.0
-            gap_pct = 0.0
-            cond_desc = "Exactly 0.0 mm"
+        exact_mask = (target == th)
+        exact_count = int(exact_mask.sum())
+
+        if inclusive_wet:
+            if th == 0.0:
+                no_rain_mask = (target == 0.0)
+                rain_mask = (target > 0.0)
+                cond_desc = "== 0.0 mm"
+            else:
+                no_rain_mask = (target < th)
+                rain_mask = (target >= th)
+                cond_desc = f"< {th:.1f} mm"
         else:
-            count = int((target < th).sum())
-            frac = float(count / total_days) if total_days > 0 else 0.0
-            gap_pct = (frac - prev_frac) if prev_frac is not None else frac
-            cond_desc = f"< {th:.1f} mm"
+            no_rain_mask = (target <= th)
+            rain_mask = (target > th)
+            cond_desc = f"<= {th:.1f} mm"
+
+        no_rain_count = int(no_rain_mask.sum())
+        rain_count = int(rain_mask.sum())
+
+        no_rain_frac = float(no_rain_count / total_days) if total_days > 0 else 0.0
+        rain_frac = float(rain_count / total_days) if total_days > 0 else 0.0
+
+        if prev_no_rain_frac is not None:
+            gap_pct = (no_rain_frac - prev_no_rain_frac) * 100.0
+        else:
+            gap_pct = 0.0
+
+        # Conditional rainfall intensity: statistics computed on wet population
+        rain_amounts = target[rain_mask]
+        if len(rain_amounts) > 0:
+            rain_mean_cond = float(rain_amounts.mean())
+            rain_median_cond = float(rain_amounts.median())
+        else:
+            rain_mean_cond = 0.0
+            rain_median_cond = 0.0
 
         records.append({
-            "threshold_mm": th,
-            "condition": cond_desc,
-            "days_count": count,
-            "pct_of_total": round(frac * 100, 2),
-            "incremental_gap_pct": round(gap_pct * 100, 2) if th != 0.0 else 0.0,
+            "threshold_mm": float(th),
+            "no_rain_condition": cond_desc,
+            "no_rain_days": no_rain_count,
+            "rain_days": rain_count,
+            "no_rain_pct": round(no_rain_frac * 100.0, 2),
+            "rain_pct": round(rain_frac * 100.0, 2),
+            "exact_threshold_days": exact_count,
+            "incremental_gap_pct": round(gap_pct, 2),
+            "rain_mean_conditional": round(rain_mean_cond, 2),
+            "rain_median_conditional": round(rain_median_cond, 2),
         })
-        prev_frac = frac
+        prev_no_rain_frac = no_rain_frac
 
     return pd.DataFrame(records)
 
