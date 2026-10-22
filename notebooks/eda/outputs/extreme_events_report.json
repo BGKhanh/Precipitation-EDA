@@ -1,0 +1,26 @@
+{
+  "__meta_bridge__": {
+    "is_bridge": true,
+    "canonical_path": "D:/DS108_project/reports/eda/01.6_extreme_events_report.json",
+    "compatibility_target": "01.7_eda_synthesis_report.ipynb / EDAReport"
+  },
+  "thresholds": {
+    "p95": 17.37,
+    "p99": 34.18,
+    "p99_9": 59.98,
+    "max_daily_mm": 107.9
+  },
+  "counts": {
+    "p95": 317,
+    "p99": 64,
+    "p99_9": 7
+  },
+  "recurrence_intervals_calendar_days": {
+    "mean_p95_days": 19.03,
+    "median_p95_days": 7.0,
+    "mean_p99_days": 95.32,
+    "median_p99_days": 36.0,
+    "calculation_method": "date_series.diff().dt.days (Rule 7 compliant)"
+  },
+  "backward_compatibility_disclaimer": "This bridge artifact is maintained solely for legacy compatibility with 01.7 synthesis and EDAReport. Comprehensive diagnostics and metadata are located in the canonical artifact at reports/eda/01.6_extreme_events_report.json."
+}
