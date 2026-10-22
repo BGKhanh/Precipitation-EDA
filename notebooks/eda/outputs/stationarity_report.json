@@ -1,0 +1,190 @@
+{
+  "metadata": {
+    "component": "01.5_stationarity_autocorrelation",
+    "population": "Dev Train (2001-01-01 -> 2018-04-30)",
+    "n_observations": 6329,
+    "target_variable": "Lượng mưa",
+    "inference_alpha": 0.05
+  },
+  "stationarity_tests": {
+    "series": "raw_rainfall_Y_t",
+    "alpha": 0.05,
+    "adf": {
+      "statistic": -8.647668758082645,
+      "p_value": 5.217289004574738e-14,
+      "selected_lag": 26,
+      "nobs": 6302,
+      "regression": "c",
+      "autolag": "AIC",
+      "is_stationary": true
+    },
+    "kpss": {
+      "statistic": 0.1927983902268492,
+      "p_value": 0.1,
+      "used_lags": 34,
+      "regression": "c",
+      "nlags": "legacy",
+      "is_stationary": true,
+      "p_value_ceiling_note": "p-value capped at 0.10 by statsmodels table"
+    },
+    "combined_conclusion": "STATIONARY",
+    "d_recommendation": 0,
+    "d_recommendation_note": "EDA heuristic recommendation only. NOT a mandatory modeling requirement. Final differencing order decided in 02_feature_engineering and 03_modeling."
+  },
+  "autocorrelation_diagnostics": {
+    "acf": {
+      "nlags": 200,
+      "alpha": 0.05,
+      "fft": true,
+      "adjusted": false,
+      "bartlett_confint": true,
+      "n_significant_lags_all": 152,
+      "top_significant_lags": [
+        1,
+        2,
+        6,
+        5,
+        4,
+        19,
+        3,
+        7,
+        8,
+        174
+      ]
+    },
+    "pacf": {
+      "nlags": 200,
+      "alpha": 0.05,
+      "method": "ywm",
+      "n_significant_lags_all": 34,
+      "top_significant_lags": [
+        1,
+        4,
+        5,
+        2,
+        6,
+        3,
+        19,
+        8,
+        13,
+        9
+      ]
+    }
+  },
+  "exploratory_sarima_heuristic": {
+    "status": "EDA-suggested baseline heuristic (NOT optimal model search)",
+    "methodology_note": "This p/q rule is a project-specific EDA heuristic based on the count of significant ACF/PACF lags. It is not a formal Box-Jenkins order identification procedure and must not be interpreted as an optimal order.",
+    "p_recommendation": 3,
+    "q_recommendation": 3,
+    "d_recommendation": 0,
+    "derivation_rule": {
+      "p": "min(3, n_significant_pacf_lags_all)",
+      "q": "min(3, n_significant_acf_lags_all)",
+      "d": "0 if STATIONARY; 1 if NON-STATIONARY; null if INCONCLUSIVE",
+      "P": "1 (heuristic for feasible seasonal candidate)",
+      "Q": "1 (heuristic for feasible seasonal candidate)",
+      "D": "1 (seasonal differencing heuristic for feasible seasonal candidate)"
+    },
+    "candidate_seasonal_orders": [
+      {
+        "P": 1,
+        "D": 1,
+        "Q": 1,
+        "s": 7,
+        "candidate_label": "weekly",
+        "is_executable_full_order": true,
+        "full_order_label": "SARIMA(3,0,3)x(1,1,1,7)"
+      },
+      {
+        "P": 1,
+        "D": 1,
+        "Q": 1,
+        "s": 30,
+        "candidate_label": "sub-monthly",
+        "is_executable_full_order": true,
+        "full_order_label": "SARIMA(3,0,3)x(1,1,1,30)"
+      }
+    ],
+    "seasonal_template_note": "candidate_seasonal_orders are seasonal templates (P=1, D=1, Q=1, s). When d_recommendation is null, they are NOT executable full SARIMA orders because the non-seasonal differencing order d remains undetermined. Downstream modeling (02_feature_engineering and 03_modeling) must select d.",
+    "feasible_seasonal_periods": [
+      7,
+      30
+    ],
+    "eda_sarima_seasonal_cap": 52,
+    "primary_seasonal_period_selection": "deferred to 03_modeling"
+  },
+  "residual_diagnostics": {
+    "series": "mstl_residual_R_t (log1p scale)",
+    "residual_acf_configuration": {
+      "nlags": 40,
+      "alpha": 0.05,
+      "fft": true,
+      "adjusted": false,
+      "bartlett_confint": true,
+      "estimator_convention": "same as primary ACF"
+    },
+    "ljung_box": {
+      "series": "mstl_residual_R_t",
+      "lags_evaluated": [
+        10,
+        30,
+        52
+      ],
+      "model_df": 0,
+      "auto_lag": false,
+      "return_df": true,
+      "lag_rationale": {
+        "10": "short-term dependence (~10 days)",
+        "30": "sub-monthly / intra-month dependence scale",
+        "52": "medium-short-range dependence beyond one month"
+      },
+      "portmanteau_note": "Ljung-Box at lag L is a portmanteau test for cumulative autocorrelation up to L; not a test for seasonality at period L.",
+      "alpha": 0.05,
+      "lb_statistics": {
+        "10": 2113.932796649504,
+        "30": 2549.3705391958642,
+        "52": 2624.093170432415
+      },
+      "lb_pvalues": {
+        "10": 0.0,
+        "30": 0.0,
+        "52": 0.0
+      }
+    },
+    "jarque_bera": {
+      "statistic": 493.7174021792425,
+      "p_value": 6.174876941019713e-108
+    },
+    "residual_stats": {
+      "count": 6329,
+      "mean": -0.0003234639071290266,
+      "std": 0.6449049810764644,
+      "skewness": 0.49281698724408624,
+      "excess_kurtosis": 0.9510125665932057
+    },
+    "eda_implication": [
+      "MSTL with periods=(7,30,365) does not fully capture all short-term structure in residuals.",
+      "Residual autocorrelation (if present) suggests AR/lag representations merit downstream evaluation.",
+      "Non-Gaussian residuals (if present) suggest conditional distribution modeling merits downstream evaluation.",
+      "Neither result establishes superiority of any specific model family.",
+      "Model selection deferred to 02_feature_engineering and 03_modeling."
+    ]
+  },
+  "__meta_bridge__": {
+    "is_bridge": true,
+    "canonical_path": "D:/DS108_project/reports/eda/01.5_stationarity_report.json",
+    "compatibility_target": "01.7_eda_synthesis_report.ipynb / EDAReport"
+  },
+  "suggested_sarima_order": [
+    3,
+    0,
+    3
+  ],
+  "suggested_seasonal_order": [
+    1,
+    1,
+    1,
+    7
+  ],
+  "backward_compatibility_disclaimer": "The top-level fields 'suggested_sarima_order' and 'suggested_seasonal_order' are backward-compatibility aliases provided solely for legacy consumers (such as EDAReport and 01.7 synthesis). When d_recommendation is null (INCONCLUSIVE), 'suggested_sarima_order' falls back to d=0 solely to maintain Tuple[int, int, int] schema validity for SARIMA_EDA initialization. This does NOT represent a finding of stationarity or a recommendation of d=0. Downstream modeling MUST consume 'stationarity_tests.combined_conclusion' and 'stationarity_tests.d_recommendation' instead of this legacy alias."
+}
