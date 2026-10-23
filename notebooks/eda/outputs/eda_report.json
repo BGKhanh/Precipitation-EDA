@@ -1,0 +1,50 @@
+{
+  "suggested_sarima_order": [
+    3,
+    0,
+    3
+  ],
+  "suggested_seasonal_order": [
+    1,
+    1,
+    1,
+    7
+  ],
+  "wet_season_months": [
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "representative_periods": [
+    7,
+    30,
+    122,
+    365
+  ],
+  "validated_rain_threshold": 0.1,
+  "vif_filtered_features": [
+    "Bức xạ sóng dài xuống",
+    "Bức xạ khuếch tán",
+    "Áp suất bề mặt"
+  ],
+  "high_skew_features": [
+    "Lượng mưa"
+  ],
+  "extreme_event_thresholds": {
+    "p95": 17.367999999999956,
+    "p99": 34.17600000000001,
+    "max_daily_mm": 107.9
+  },
+  "intermittency_adi": 1.64,
+  "intermittency_cv2": 2.02,
+  "diagnostic_labels_optional": {
+    "sarima_order_status": "EDA-suggested baseline heuristic (NOT optimal model search)",
+    "wavelet_status": "excluded_from_primary_pipeline",
+    "intermittency_classification": "LUMPY-like (demand taxonomy analogy)",
+    "stationarity_adf": "STATIONARY"
+  }
+}

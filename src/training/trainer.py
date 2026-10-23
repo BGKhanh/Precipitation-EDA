@@ -384,7 +384,10 @@ def build_sarima_from_eda(report) -> "SARIMAModel":
     Returns:
         Unfitted ``SARIMAModel`` with data-driven order/seasonal_order.
     """
-    from ..models.time_series import SARIMAModel
+    try:
+        from ..models.legacy import SARIMAModel
+    except (ImportError, ModuleNotFoundError):
+        from ..models import SARIMAModel
 
     order = tuple(report.suggested_sarima_order)
     seasonal_order = tuple(report.suggested_seasonal_order) if report.suggested_seasonal_order else None
@@ -394,7 +397,10 @@ def build_sarima_from_eda(report) -> "SARIMAModel":
         print(f"   Seasonal order: {seasonal_order}")
         return SARIMAModel(order=order, seasonal_order=seasonal_order)
     else:
-        from ..models.time_series import ARIMAModel
+        try:
+            from ..models.legacy import ARIMAModel
+        except (ImportError, ModuleNotFoundError):
+            from ..models import ARIMAModel
         return ARIMAModel(order=order)
 
 
@@ -413,7 +419,8 @@ def build_two_stage_from_eda(model_cls, report, **kwargs):
         Unfitted model instance.
     """
     threshold = report.validated_rain_threshold
-    print(f"   Building {model_cls.__name__} with threshold={threshold}")
+    cls_name = getattr(model_cls, "__name__", type(model_cls).__name__)
+    print(f"   Building {cls_name} with threshold={threshold}")
     return model_cls(
         use_two_stage=True,
         classification_threshold=threshold,
