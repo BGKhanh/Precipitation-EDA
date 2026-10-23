@@ -327,32 +327,68 @@ def build_purged_direct_samples(
     feature_cols: List[str],
     target_col: str = "Lượng mưa",
     horizon: int = 7,
+    origin_mask: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray, pd.Series]:
     """Build multi-horizon direct regression samples (X_t -> [y_{t+1}, ..., y_{t+H}]).
 
     Enforces Horizon Purge: Samples where t + H > len(df) are strictly purged
     (exactly H origins discarded at the end of df), guaranteeing zero boundary
     bleed across splits.
+
+    If origin_mask is provided, candidate origins (max_origin = max(0, len(df) - horizon))
+    are filtered post-label-construction to preserve exact future targets and align with
+    standardized common origins.
     """
     n = len(df)
-    max_origin = n - horizon
-    if max_origin <= 0:
-        return np.empty((0, len(feature_cols))), np.empty((0, horizon)), pd.Series(dtype="object")
-    
-    X_mat = df[feature_cols].values
-    y_vec = df[target_col].values
+    max_origin = max(0, n - horizon)
+
+    # 1. Short input / insufficient horizon handling
+    if max_origin == 0:
+        if origin_mask is not None and len(origin_mask) != 0:
+            raise ValueError("origin_mask length must be 0 when max_origin == 0")
+        return (
+            np.empty((0, len(feature_cols)), dtype=np.float64),
+            np.empty((0, horizon), dtype=np.float64),
+            pd.Series(dtype="datetime64[ns]"),
+        )
+
+    # 2. Mask length validation
+    if origin_mask is not None:
+        if len(origin_mask) != max_origin:
+            raise ValueError(
+                f"origin_mask length ({len(origin_mask)}) does not match candidate origin count ({max_origin})"
+            )
+
+    X_mat = df[feature_cols].to_numpy(dtype=np.float64)
+    y_vec = df[target_col].to_numpy(dtype=np.float64)
     dates = df["Ngày"] if "Ngày" in df.columns else pd.Series(range(n))
-    
+
     X_samples = []
     Y_samples = []
     origin_dates = []
-    
+
+    # 3. Construct multi-horizon targets from unbroken df, then apply mask
     for i in range(max_origin):
+        if origin_mask is not None and not origin_mask[i]:
+            continue
         X_samples.append(X_mat[i])
         Y_samples.append(y_vec[i + 1 : i + 1 + horizon])
         origin_dates.append(dates.iloc[i])
-        
-    return np.array(X_samples), np.array(Y_samples), pd.Series(origin_dates)
+
+    if len(X_samples) == 0:
+        return (
+            np.empty((0, len(feature_cols)), dtype=np.float64),
+            np.empty((0, horizon), dtype=np.float64),
+            pd.Series(dtype="datetime64[ns]"),
+        )
+
+    X_arr = np.array(X_samples, dtype=np.float64)
+    Y_arr = np.array(Y_samples, dtype=np.float64)
+    dates_series = pd.Series(origin_dates)
+    if pd.api.types.is_datetime64_any_dtype(dates):
+        dates_series = pd.to_datetime(dates_series)
+
+    return X_arr, Y_arr, dates_series
 
 
 # ======================================================================

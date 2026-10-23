@@ -18,13 +18,54 @@ from .utils import (
 )
 
 from .builder import FeatureBuilder, FeatureConfig
+from .contract import (
+    FeatureAvailability,
+    FeatureSpec,
+    SplitProvenance,
+    FeatureLineage,
+    FeatureContract,
+    FeatureSet,
+    compute_dataframe_fingerprint,
+    get_canonical_repo_root,
+    get_verified_eda_report_hash,
+)
+from .splits import (
+    build_split_feature_sets,
+    build_origin_mask,
+    derive_common_origins_and_finalize_lineage,
+    build_all_feature_levels,
+)
 from .stationarity_test import StationarityTester
-from .validation import assert_no_target_leakage
+from .validation import (
+    assert_no_target_leakage,
+    validate_target_excluded,
+    validate_feature_matrix_schema,
+    validate_availability,
+    validate_causality,
+    validate_label_alignment,
+    validate_warmup_vs_missing,
+    validate_split_provenance,
+    diagnose_target_correlation,
+)
 
 __all__ = [
-    # Builder (primary API going forward)
+    # Builder & Splits Orchestration (primary API)
     'FeatureBuilder',
     'FeatureConfig',
+    'build_split_feature_sets',
+    'build_origin_mask',
+    'derive_common_origins_and_finalize_lineage',
+    'build_all_feature_levels',
+    # Contract dataclasses
+    'FeatureAvailability',
+    'FeatureSpec',
+    'SplitProvenance',
+    'FeatureLineage',
+    'FeatureContract',
+    'FeatureSet',
+    'compute_dataframe_fingerprint',
+    'get_canonical_repo_root',
+    'get_verified_eda_report_hash',
     # Low-level primitives
     'select_features',
     'create_temporal_features',
@@ -44,4 +85,12 @@ __all__ = [
     'StationarityTester',
     # Validation
     'assert_no_target_leakage',
+    'validate_target_excluded',
+    'validate_feature_matrix_schema',
+    'validate_availability',
+    'validate_causality',
+    'validate_label_alignment',
+    'validate_warmup_vs_missing',
+    'validate_split_provenance',
+    'diagnose_target_correlation',
 ]
