@@ -26,6 +26,13 @@
     365
   ],
   "validated_rain_threshold": 0.1,
+  "validated_rain_threshold_operator": ">=",
+  "eda_selected_threshold_mm": 0.1,
+  "canonical_rain_threshold": 1.0,
+  "canonical_rain_threshold_operator": ">=",
+  "canonical_intermittency_adi": 2.3,
+  "canonical_intermittency_cv2": 1.25,
+  "canonical_intermittency_classification": "LUMPY-like (demand taxonomy analogy)",
   "vif_filtered_features": [
     "Bức xạ sóng dài xuống",
     "Bức xạ khuếch tán",

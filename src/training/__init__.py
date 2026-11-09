@@ -20,9 +20,13 @@ from .trainer import (
     build_neural_direct_adapter_from_eda,
 )
 from .metrics import (
-    cumulative_rainfall_mae,
-    cumulative_rainfall_bias,
-    evaluate_cumulative_rainfall,
+    mean_absolute_error,
+    mean_squared_error,
+    root_mean_squared_error,
+    mean_absolute_scaled_error,
+    compute_dev_train_mase_scale,
+    evaluate_point_forecast_metrics,
+    CANONICAL_DEV_TRAIN_MASE_SCALE,
 )
 from .benchmark_utils import (
     UNIFIED_SCHEMA,
@@ -53,9 +57,13 @@ __all__ = [
     'build_ml_direct_adapter_from_eda',
     'build_ml_tweedie_adapter_from_eda',
     'build_neural_direct_adapter_from_eda',
-    'cumulative_rainfall_mae',
-    'cumulative_rainfall_bias',
-    'evaluate_cumulative_rainfall',
+    'mean_absolute_error',
+    'mean_squared_error',
+    'root_mean_squared_error',
+    'mean_absolute_scaled_error',
+    'compute_dev_train_mase_scale',
+    'evaluate_point_forecast_metrics',
+    'CANONICAL_DEV_TRAIN_MASE_SCALE',
     'UNIFIED_SCHEMA',
     'get_default_contract',
     'save_modeling_contract',

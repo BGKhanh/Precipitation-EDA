@@ -23,7 +23,7 @@ class RainfallTrainer:
     
     def __init__(
         self,
-        classification_threshold: float = 0.1,
+        classification_threshold: float = 1.0,
         test_size: float = 0.2,
         random_state: int = 42,
         cv_splits: int = 5
@@ -83,12 +83,28 @@ class RainfallTrainer:
         
         print(f"   Features: {len(feature_columns)}")
         print(f"   Samples: {len(X)}")
-        print(f"   Rain events (>{self.classification_threshold}mm): {(y > self.classification_threshold).sum()} ({(y > self.classification_threshold).mean()*100:.1f}%)")
+        print(f"   Rain events (>={self.classification_threshold}mm): {(y >= self.classification_threshold).sum()} ({(y >= self.classification_threshold).mean()*100:.1f}%)")
         
-        # Time series split (preserve temporal order)
-        split_idx = int(len(X) * (1 - self.test_size))
-        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        # Canonical time series split with continuity verification per Rule 2 and Rule 7
+        date_candidates = ["Ngày", "date", "ds"]
+        date_col = next((c for c in date_candidates if c in df.columns), None)
+        if date_col is not None:
+            from ..data.dataquality import check_continuity
+            from ..data.loader import time_series_split, DEFAULT_TEST_START_DATE
+            
+            check_continuity(df, date_col=date_col, raise_on_gap=True)
+            train_df, test_df = time_series_split(
+                df, date_col=date_col, test_start_date=DEFAULT_TEST_START_DATE
+            )
+            X_train = train_df[feature_columns].dropna()
+            y_train = train_df.loc[X_train.index, target_column]
+            X_test = test_df[feature_columns].dropna()
+            y_test = test_df.loc[X_test.index, target_column]
+        else:
+            # Fallback when date column is absent from raw feature matrix
+            split_idx = int(len(X) * (1 - self.test_size))
+            X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+            y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
         
         print(f"   Train samples: {len(X_train)}")
         print(f"   Test samples: {len(X_test)}")
@@ -148,7 +164,7 @@ class RainfallTrainer:
                 regression_params=best_reg_params
             )
             
-            y_train_binary = (y_train > self.classification_threshold).astype(int)
+            y_train_binary = (y_train >= self.classification_threshold).astype(int)
             final_model.fit(X_train, y_train, y_train_binary)
             
             optimization_results = {
@@ -206,7 +222,7 @@ class RainfallTrainer:
         if verbose:
             print(f"\n📊 Evaluating {model.__class__.__name__} on test set...")
         
-        y_test_binary = (y_test > self.classification_threshold).astype(int)
+        y_test_binary = (y_test >= self.classification_threshold).astype(int)
         
         # Make predictions
         if hasattr(model, 'predict_combined') and model.use_two_stage:
@@ -218,7 +234,7 @@ class RainfallTrainer:
             clf_auc = roc_auc_score(y_test_binary, pred_binary) if len(np.unique(y_test_binary)) > 1 else 0.0
             
             # Evaluate regression (only on rain days)
-            rain_mask = y_test > self.classification_threshold
+            rain_mask = y_test >= self.classification_threshold
             if rain_mask.sum() > 0:
                 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
                 reg_mae = mean_absolute_error(y_test[rain_mask], pred_continuous[rain_mask])
@@ -332,7 +348,7 @@ class RainfallTrainer:
                 else:
                     # Train with default parameters
                     model = config['class'](use_two_stage=config.get('use_two_stage', True))
-                    y_train_binary = (y_train > self.classification_threshold).astype(int)
+                    y_train_binary = (y_train >= self.classification_threshold).astype(int)
                     if hasattr(model, 'fit') and config.get('use_two_stage', True):
                         model.fit(X_train, y_train, y_train_binary)
                     else:
@@ -407,23 +423,46 @@ def build_sarima_from_eda(report) -> "SARIMAModel":
 def build_two_stage_from_eda(model_cls, report, **kwargs):
     """Build a two-stage rainfall model using EDAReport.
 
-    Uses ``report.validated_rain_threshold`` as the classification
-    threshold.
+    Uses ``report.canonical_rain_threshold`` as the classification
+    threshold, validating and normalizing to exact float 1.0 (P0).
+    Silent fallback to legacy threshold is strictly prohibited.
 
     Args:
         model_cls: Model class (e.g. ``RandomForestRainfallModel``).
-        report: An ``EDAReport`` instance.
+        report: An ``EDAReport`` instance or dictionary.
         **kwargs: Extra keyword arguments for the model constructor.
 
     Returns:
         Unfitted model instance.
     """
-    threshold = report.validated_rain_threshold
+    from ..evaluation.protocols import validate_and_normalize_canonical_threshold
+
+    if isinstance(report, dict):
+        raw_th = report.get("canonical_rain_threshold")
+        raw_op = report.get("canonical_rain_threshold_operator")
+    else:
+        raw_th = getattr(report, "canonical_rain_threshold", None)
+        raw_op = getattr(report, "canonical_rain_threshold_operator", None)
+
+    if raw_th is None:
+        raise ValueError(
+            "[build_two_stage_from_eda] EDAReport missing required 'canonical_rain_threshold'. "
+            "Silent fallback to legacy threshold is strictly prohibited (P0 Decoupling)."
+        )
+
+    if raw_op is not None and str(raw_op) != ">=":
+        raise ValueError(
+            f"[build_two_stage_from_eda] Unsupported canonical_rain_threshold_operator '{raw_op}'. "
+            f"Expected '>='."
+        )
+
+    norm_th = validate_and_normalize_canonical_threshold(raw_th, source_name="build_two_stage_from_eda")
+
     cls_name = getattr(model_cls, "__name__", type(model_cls).__name__)
-    print(f"   Building {cls_name} with threshold={threshold}")
+    print(f"   Building {cls_name} with canonical threshold={norm_th} (operator: >=)")
     return model_cls(
         use_two_stage=True,
-        classification_threshold=threshold,
+        classification_threshold=norm_th,
         **kwargs,
     )
 
@@ -529,4 +568,4 @@ def build_neural_direct_adapter_from_eda(
     """Build NeuralForecastAdapter with Neural Direct models (MAE loss, no Tweedie)."""
     from ..models.nixtla import NeuralForecastAdapter, get_neural_direct_models
     chosen_models = models if models is not None else get_neural_direct_models(horizon=horizon, max_steps=max_steps, eda_report=eda_report)
-    return NeuralForecastAdapter(models=chosen_models, horizon=horizon, **kwargs)
+    return NeuralForecastAdapter(models=chosen_models, horizon=horizon, **kwargs)

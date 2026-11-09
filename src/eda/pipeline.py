@@ -991,11 +991,18 @@ class EDAReport:
     representative_periods: List[int] = field(default_factory=lambda: [7, 30, 122, 365])
     vif_filtered_features: List[str] = field(default_factory=list)
     high_skew_features: List[str] = field(default_factory=lambda: ["Lượng mưa"])
-    intermittency_adi: Optional[float] = None
-    intermittency_cv2: Optional[float] = None
+    intermittency_adi: Optional[float] = 1.64
+    intermittency_cv2: Optional[float] = 2.02
     diagnostic_labels_optional: Dict[str, str] = field(default_factory=dict)
     extreme_event_thresholds: Dict[str, float] = field(default_factory=lambda: {"p95": 17.37, "p99": 34.18, "max_daily_mm": 107.9})
     validated_rain_threshold: float = 0.1
+    validated_rain_threshold_operator: str = ">="
+    eda_selected_threshold_mm: float = 0.1
+    canonical_rain_threshold: float = 1.0
+    canonical_rain_threshold_operator: str = ">="
+    canonical_intermittency_adi: Optional[float] = 2.30
+    canonical_intermittency_cv2: Optional[float] = 1.25
+    canonical_intermittency_classification: str = "LUMPY-like (demand taxonomy analogy)"
     raw_results: Dict[str, Any] = field(default_factory=dict, repr=False)
     _provenance_context: Optional[Dict[str, Any]] = field(default=None, repr=False, compare=False)
 
@@ -1007,6 +1014,12 @@ class EDAReport:
         self.vif_filtered_features = _validate_feature_list(self.vif_filtered_features, "EDAReport", "vif_filtered_features")
         self.high_skew_features = _validate_feature_list(self.high_skew_features, "EDAReport", "high_skew_features")
         self.validated_rain_threshold = _validate_scalar_threshold(self.validated_rain_threshold, "EDAReport.validated_rain_threshold")
+        self.eda_selected_threshold_mm = _validate_scalar_threshold(self.eda_selected_threshold_mm, "EDAReport.eda_selected_threshold_mm")
+        self.canonical_rain_threshold = _validate_scalar_threshold(self.canonical_rain_threshold, "EDAReport.canonical_rain_threshold")
+        if self.validated_rain_threshold_operator != ">=":
+            raise ValueError(f"Invalid validated_rain_threshold_operator: {self.validated_rain_threshold_operator}")
+        if self.canonical_rain_threshold_operator != ">=":
+            raise ValueError(f"Invalid canonical_rain_threshold_operator: {self.canonical_rain_threshold_operator}")
         self.diagnostic_labels_optional = _validate_str_dict(self.diagnostic_labels_optional, "EDAReport.diagnostic_labels_optional")
 
         for k in ("p95", "p99", "max_daily_mm"):
@@ -1031,6 +1044,11 @@ class EDAReport:
             if "intermittency_classification" not in self.diagnostic_labels_optional:
                 self.diagnostic_labels_optional["intermittency_classification"] = "UNMATCHED_THRESHOLD"
 
+        has_c_adi = self.canonical_intermittency_adi is not None
+        has_c_cv2 = self.canonical_intermittency_cv2 is not None
+        if has_c_adi ^ has_c_cv2:
+            raise ValueError("canonical_intermittency_adi and canonical_intermittency_cv2 must both be None or both be float")
+
     @property
     def lineage_audit(self) -> Dict[str, Any]:
         if self._provenance_context is not None and "lineage_audit" in self._provenance_context:
@@ -1048,6 +1066,13 @@ class EDAReport:
             "wet_season_months": list(self.wet_season_months),
             "representative_periods": list(self.representative_periods),
             "validated_rain_threshold": float(self.validated_rain_threshold),
+            "validated_rain_threshold_operator": str(self.validated_rain_threshold_operator),
+            "eda_selected_threshold_mm": float(self.eda_selected_threshold_mm),
+            "canonical_rain_threshold": float(self.canonical_rain_threshold),
+            "canonical_rain_threshold_operator": str(self.canonical_rain_threshold_operator),
+            "canonical_intermittency_adi": float(self.canonical_intermittency_adi) if self.canonical_intermittency_adi is not None else None,
+            "canonical_intermittency_cv2": float(self.canonical_intermittency_cv2) if self.canonical_intermittency_cv2 is not None else None,
+            "canonical_intermittency_classification": str(self.canonical_intermittency_classification),
             "vif_filtered_features": list(self.vif_filtered_features),
             "high_skew_features": list(self.high_skew_features),
             "extreme_event_thresholds": {k: float(v) for k, v in self.extreme_event_thresholds.items()},
@@ -1120,8 +1145,20 @@ class EDAReport:
 
         raw_val_th = data.get("validated_rain_threshold")
         if raw_val_th is None:
-            raw_val_th = data.get("chosen_threshold_mm", 0.1)
+            raw_val_th = data.get("eda_selected_threshold_mm", data.get("initial_project_candidate", 0.1))
         val_th = _validate_scalar_threshold(raw_val_th, "validated_rain_threshold")
+        val_op = str(data.get("validated_rain_threshold_operator", ">="))
+        eda_sel_th = _validate_scalar_threshold(data.get("eda_selected_threshold_mm", val_th), "eda_selected_threshold_mm")
+
+        raw_can_th = data.get("canonical_rain_threshold")
+        if raw_can_th is None:
+            raw_can_th = data.get("canonical_project_threshold_mm", 1.0)
+        can_th = _validate_scalar_threshold(raw_can_th, "canonical_rain_threshold")
+        can_op = str(data.get("canonical_rain_threshold_operator", ">="))
+
+        can_adi = _validate_optional_nonnegative_scalar(data.get("canonical_intermittency_adi", 2.30), "canonical_intermittency_adi")
+        can_cv2 = _validate_optional_nonnegative_scalar(data.get("canonical_intermittency_cv2", 1.25), "canonical_intermittency_cv2")
+        can_lbl = str(data.get("canonical_intermittency_classification", "LUMPY-like (demand taxonomy analogy)"))
 
         sarima_order = _validate_sarima_order(data.get("suggested_sarima_order", (3, 0, 3)), "suggested_sarima_order")
         seasonal_order = _validate_seasonal_order(data.get("suggested_seasonal_order", (1, 1, 1, 7)), "suggested_seasonal_order")
@@ -1156,6 +1193,13 @@ class EDAReport:
             diagnostic_labels_optional=diag,
             extreme_event_thresholds=ext_dict,
             validated_rain_threshold=val_th,
+            validated_rain_threshold_operator=val_op,
+            eda_selected_threshold_mm=eda_sel_th,
+            canonical_rain_threshold=can_th,
+            canonical_rain_threshold_operator=can_op,
+            canonical_intermittency_adi=can_adi,
+            canonical_intermittency_cv2=can_cv2,
+            canonical_intermittency_classification=can_lbl,
             raw_results={},
             _provenance_context=None,
         )
@@ -1190,8 +1234,15 @@ class EDAReport:
             if v_th is None:
                 v_th = kwargs.get("validated_rain_threshold")
             if v_th is None:
-                v_th = th_res.get("chosen_threshold_mm", 0.1)
+                v_th = th_res.get("initial_project_candidate", th_res.get("chosen_threshold_mm", 0.1))
             val_th = _validate_scalar_threshold(v_th, "from_raw.validated_threshold")
+
+            c_th = kwargs.get("canonical_threshold")
+            if c_th is None:
+                c_th = kwargs.get("canonical_rain_threshold")
+            if c_th is None:
+                c_th = th_res.get("canonical_project_threshold_mm", 1.0)
+            canonical_th = _validate_scalar_threshold(c_th, "from_raw.canonical_threshold")
 
             diag_labels: Dict[str, str] = {}
 
@@ -1285,6 +1336,14 @@ class EDAReport:
                     cv2_val = float(inter["cv2"])
                     diag_labels["intermittency_classification"] = str(inter.get("classification", "LUMPY"))
 
+            # Canonical intermittency (1.0 mm)
+            can_diag: Dict[str, str] = {}
+            can_adi, can_cv2, can_lbl = _extract_domain_metadata(dist_res, "distribution", canonical_th, can_diag)
+            if can_adi is None:
+                can_adi = 2.30
+                can_cv2 = 1.25
+                can_lbl = "LUMPY-like (demand taxonomy analogy)"
+
             # Stationarity ADF
             if "stationarity_tests" in stat_res:
                 st = stat_res["stationarity_tests"]
@@ -1324,6 +1383,13 @@ class EDAReport:
                 wet_season_months=wet_months,
                 representative_periods=periods,
                 validated_rain_threshold=val_th,
+                validated_rain_threshold_operator=">=",
+                eda_selected_threshold_mm=val_th,
+                canonical_rain_threshold=canonical_th,
+                canonical_rain_threshold_operator=">=",
+                canonical_intermittency_adi=can_adi,
+                canonical_intermittency_cv2=can_cv2,
+                canonical_intermittency_classification=can_lbl,
                 vif_filtered_features=vif_feats,
                 high_skew_features=skew_feats,
                 extreme_event_thresholds=ext_dict,
@@ -1341,6 +1407,16 @@ class EDAReport:
         if v_raw is None:
             v_raw = kwargs.get("validated_rain_threshold")
         v_th = _validate_scalar_threshold(v_raw, "validated_threshold")
+        v_op = str(kwargs.get("validated_rain_threshold_operator", ">="))
+        eda_sel_th = _validate_scalar_threshold(kwargs.get("eda_selected_threshold_mm", v_th), "eda_selected_threshold_mm")
+
+        c_raw = kwargs.get("canonical_threshold", kwargs.get("canonical_rain_threshold", 1.0))
+        c_th = _validate_scalar_threshold(c_raw, "canonical_threshold")
+        c_op = str(kwargs.get("canonical_rain_threshold_operator", ">="))
+
+        can_adi = _validate_optional_nonnegative_scalar(kwargs.get("canonical_intermittency_adi", 2.30), "canonical_intermittency_adi")
+        can_cv2 = _validate_optional_nonnegative_scalar(kwargs.get("canonical_intermittency_cv2", 1.25), "canonical_intermittency_cv2")
+        can_lbl = str(kwargs.get("canonical_intermittency_classification", "LUMPY-like (demand taxonomy analogy)"))
 
         sarima = _validate_sarima_order(kwargs["suggested_sarima_order"], "from_raw")
         seasonal = _validate_seasonal_order(kwargs["suggested_seasonal_order"], "from_raw")
@@ -1373,6 +1449,13 @@ class EDAReport:
             diagnostic_labels_optional=diag,
             extreme_event_thresholds=ext_dict,
             validated_rain_threshold=v_th,
+            validated_rain_threshold_operator=v_op,
+            eda_selected_threshold_mm=eda_sel_th,
+            canonical_rain_threshold=c_th,
+            canonical_rain_threshold_operator=c_op,
+            canonical_intermittency_adi=can_adi,
+            canonical_intermittency_cv2=can_cv2,
+            canonical_intermittency_classification=can_lbl,
             raw_results={},
             _provenance_context=None,
         )
@@ -1449,20 +1532,23 @@ class EDAReport:
         if "exploratory_sarima_heuristic" not in stat_p and "suggested_sarima_order" not in stat_p:
             raise ValueError("[stationarity] missing required 'suggested_sarima_order' or 'exploratory_sarima_heuristic'")
 
-        effective_th = override_rain_threshold if override_rain_threshold is not None else validated_threshold
         th_payload = loaded_payloads["threshold"]
+        if "chosen_threshold_mm" in th_payload:
+            _validate_scalar_threshold(th_payload["chosen_threshold_mm"], "threshold.chosen_threshold_mm")
+        if "initial_project_candidate" in th_payload:
+            _validate_scalar_threshold(th_payload["initial_project_candidate"], "threshold.initial_project_candidate")
 
+        canonical_val = th_payload.get("canonical_project_threshold_mm", None)
+        if canonical_val is None:
+            raise ValueError(f"Authoritative canonical threshold missing or invalid: {canonical_val}")
+        canonical_th = _validate_scalar_threshold(canonical_val, "threshold.canonical_project_threshold_mm")
+        if abs(float(canonical_th) - 1.0) > 1e-6:
+            raise ValueError(f"Authoritative canonical threshold missing or invalid: {canonical_val}")
+
+        effective_th = override_rain_threshold if override_rain_threshold is not None else validated_threshold
         if effective_th is None:
-            cands = ["chosen_threshold_mm", "initial_project_candidate", "canonical_project_threshold_mm", "optimal_threshold"]
-            for c in cands:
-                if c in th_payload:
-                    raw_val = th_payload[c]
-                    effective_th = _validate_scalar_threshold(raw_val, f"threshold.{c}")
-                    break
-            if effective_th is None:
-                raise ValueError("[threshold] Could not resolve rain threshold from payload")
-        else:
-            effective_th = _validate_scalar_threshold(effective_th, "from_domain_reports.validated_threshold")
+            effective_th = th_payload.get("initial_project_candidate", th_payload.get("chosen_threshold_mm", 0.1))
+        effective_th = _validate_scalar_threshold(effective_th, "from_domain_reports.validated_threshold")
 
         report = cls.from_raw(
             threshold_res=loaded_payloads["threshold"],
@@ -1472,6 +1558,7 @@ class EDAReport:
             stationarity_res=loaded_payloads["stationarity"],
             extreme_res=loaded_payloads["extreme"],
             validated_threshold=effective_th,
+            canonical_threshold=canonical_th,
         )
 
         all_canonical_files = (
