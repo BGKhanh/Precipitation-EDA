@@ -12,6 +12,15 @@ import pandas as pd
 # Subpackages
 from . import legacy
 from . import nixtla
+from .hurdle import (
+    DirectHurdleForecaster,
+    build_logistic_linear_hurdle,
+    build_lightgbm_hurdle,
+    build_random_forest_hurdle,
+    build_xgboost_hurdle,
+    CANONICAL_RAIN_THRESHOLD_MM,
+    HARD_GATE_THRESHOLD_GRID,
+)
 
 # Modern Nixtlaverse exports
 from .nixtla import (
@@ -19,6 +28,8 @@ from .nixtla import (
     StatsForecastAdapter,
     MLForecastAdapter,
     NeuralForecastAdapter,
+    StatsForecastWrapper,
+    FrozenIntermittentWrapper,
     to_nixtla_format,
     get_default_stats_models,
     get_default_ml_models,
@@ -72,11 +83,19 @@ __all__ = [
     # Subpackages
     'legacy',
     'nixtla',
+    # Direct Hurdle (Decision M1)
+    'DirectHurdleForecaster',
+    'build_logistic_linear_hurdle',
+    'build_lightgbm_hurdle',
+    'CANONICAL_RAIN_THRESHOLD_MM',
+    'HARD_GATE_THRESHOLD_GRID',
     # Nixtlaverse
     'BaseNixtlaAdapter',
     'StatsForecastAdapter',
     'MLForecastAdapter',
     'NeuralForecastAdapter',
+    'StatsForecastWrapper',
+    'FrozenIntermittentWrapper',
     'to_nixtla_format',
     'get_default_stats_models',
     'get_default_ml_models',

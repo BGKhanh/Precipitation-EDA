@@ -1,4 +1,11 @@
-"""Default model lists, configurations, and registries for 5-group benchmarking."""
+"""Default model lists, configurations, and registries for 7-group benchmarking.
+
+Strictly aligned with Protocol v1.0.20 and Model Specifications Report v1.1.3:
+- Decision M6a: Fixed context window W = 30 days (input_size = 30) for deep neural models.
+- Decision PROP-03: Fixed training budget max_steps = 10,000 steps (~50 epochs), batch_size = 32, lr = 1e-3.
+- Decision M7: Intermittent models with domain bucket size N=2 for ADIDA and K=2 for IMAPA.
+- Decision M1: Only 2 canonical Hurdle models: Logistic+Linear and LightGBM_Hurdle.
+"""
 
 from typing import List, Any, Optional, Dict
 import logging
@@ -185,14 +192,16 @@ def get_ml_tweedie_models(eda_report: Optional[Any] = None) -> List[Any]:
 # ======================================================================
 
 def get_ml_hurdle_models(
-    classification_threshold: float = 0.1,
+    classification_threshold: float = 1.0,
     random_state: int = 42,
 ) -> Dict[str, Any]:
-    """Return ML two-stage Hurdle models (Classifier + Regressor).
+    """Return canonical ML two-stage Hurdle models (Classifier + Regressor).
 
-    Models:
-    - Hurdle Baseline: Logistic Regression + Linear Regression
-    - Tree Hurdle: RandomForest, XGBoost, LightGBM
+    Restored 4 canonical models across Strategies A & B (72 Scenarios):
+    - Logistic+Linear
+    - RandomForest_Hurdle
+    - XGBoost_Hurdle
+    - LightGBM_Hurdle
     """
     from ..legacy.linear_models import LinearRainfallModel
     from ..legacy.tree_models import (
@@ -232,18 +241,18 @@ def get_ml_hurdle_models(
 
 def get_neural_direct_models(
     horizon: int = 7,
-    input_size: int = 28,
-    max_steps: int = 250,
+    input_size: int = 30,  # Decision M6a: Locked W = 30 days
+    max_steps: int = 10000,  # Decision PROP-03: Fixed budget 50 epochs / 10,000 steps
+    batch_size: int = 32,  # Decision PROP-03: batch_size = 32
+    learning_rate: float = 1e-3,  # Decision PROP-03: learning_rate = 1e-3
     eda_report: Optional[Any] = None,
 ) -> List[Any]:
     """Return Neural deep learning models with standard loss (MAE).
 
-    Scaled capacity for GPU acceleration (GTX 1650 4GB VRAM):
-    - Neural Baseline: LSTM (hidden_size=128, 2 layers)
-    - TCN: kernel_size=3, dilations=[1, 2, 4, 8], hidden_size=64
-    - NHITS: 3 multi-rate blocks, mlp_units=256
-    - PatchTST: patch_len=7, stride=3, hidden_size=128, 8 attention heads
-    - TFT: Temporal Fusion Transformer, hidden_size=64, 4 heads
+    Strictly aligned with Protocol v1.0.20:
+    - 5 canonical models: LSTM, TCN, NHITS, PatchTST, TFT
+    - Context window W = 30 days (Decision M6a)
+    - Controlled Experimental Design: max_steps = 10,000, batch_size = 32, lr = 1e-3 (PROP-03)
     """
     try:
         from neuralforecast.models import LSTM, TCN, NHITS, PatchTST, TFT
@@ -257,6 +266,9 @@ def get_neural_direct_models(
                 encoder_n_layers=2,
                 loss=MAE(),
                 max_steps=max_steps,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                random_seed=42,
             ),
             TCN(
                 h=horizon,
@@ -266,6 +278,9 @@ def get_neural_direct_models(
                 dilations=[1, 2, 4, 8],
                 loss=MAE(),
                 max_steps=max_steps,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                random_seed=42,
             ),
             NHITS(
                 h=horizon,
@@ -275,6 +290,9 @@ def get_neural_direct_models(
                 n_pool_kernel_size=[2, 2, 1],
                 loss=MAE(),
                 max_steps=max_steps,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                random_seed=42,
             ),
             PatchTST(
                 h=horizon,
@@ -286,6 +304,9 @@ def get_neural_direct_models(
                 linear_hidden_size=256,
                 loss=MAE(),
                 max_steps=max_steps,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                random_seed=42,
             ),
             TFT(
                 h=horizon,
@@ -295,6 +316,9 @@ def get_neural_direct_models(
                 dropout=0.1,
                 loss=MAE(),
                 max_steps=max_steps,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                random_seed=42,
             ),
         ]
     except Exception as e:

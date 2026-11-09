@@ -4,6 +4,7 @@ from .base_adapter import BaseNixtlaAdapter, to_nixtla_format
 from .stats_adapter import StatsForecastAdapter
 from .ml_adapter import MLForecastAdapter
 from .neural_adapter import NeuralForecastAdapter
+from .wrappers import StatsForecastWrapper, FrozenIntermittentWrapper
 from .defaults import (
     get_statistical_models,
     get_eda_arima_model,
@@ -22,6 +23,8 @@ __all__ = [
     "StatsForecastAdapter",
     "MLForecastAdapter",
     "NeuralForecastAdapter",
+    "StatsForecastWrapper",
+    "FrozenIntermittentWrapper",
     "to_nixtla_format",
     "get_statistical_models",
     "get_eda_arima_model",
