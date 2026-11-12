@@ -1,0 +1,145 @@
+{
+  "project": "Rainfall Forecasting HCMC (DS108)",
+  "version": "1.0.0",
+  "date_packaged": "2026-11-11",
+  "governance_frozen_constants": {
+    "canonical_dev_train_cutoff": "2018-04-30",
+    "canonical_dev_train_origins": 6293,
+    "canonical_mase_scale_dev_train": 3.7015424361567635,
+    "rain_threshold_tau_mm": 1.0,
+    "horizon_days": 7,
+    "feature_warmup_lookback_days": 29
+  },
+  "models": {
+    "serving": {
+      "scenario_id": "SC-35",
+      "model_name": "xgboost_tweedie_F3",
+      "registry_alias": "serving",
+      "governance_role": "test_ranking_winner",
+      "feature_level": "F3",
+      "feature_count": 70,
+      "hyperparameters": {
+        "objective": "reg:tweedie",
+        "tweedie_variance_power": 1.5,
+        "learning_rate": 0.03,
+        "max_depth": 5,
+        "n_estimators": 100,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "random_state": 42
+      },
+      "artifacts": {
+        "model_file": "sc35_xgboost_tweedie_f3.joblib",
+        "feature_builder_file": "feature_builder_f3.joblib"
+      },
+      "benchmark_metrics": {
+        "val_MAE": 3.168312,
+        "val_RMSE": 6.643491,
+        "val_MASE": 0.85594,
+        "val_rank": 4,
+        "test_MAE": 3.733345,
+        "test_RMSE": 8.098204,
+        "test_MASE": 1.008592,
+        "test_rank": 1
+      }
+    },
+    "shadow_val_champ": {
+      "scenario_id": "SC-30",
+      "model_name": "lightgbm_tweedie_F2",
+      "registry_alias": "shadow_val_champ",
+      "governance_role": "validation_selected_champion",
+      "feature_level": "F2",
+      "feature_count": 65,
+      "packaged_configuration": "Config A (Validation Winner)",
+      "hyperparameters_config_a_validation_winner": {
+        "objective": "tweedie",
+        "tweedie_variance_power": 1.5,
+        "learning_rate": 0.03,
+        "num_leaves": 31,
+        "max_depth": -1,
+        "n_estimators": 100,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "random_state": 42,
+        "notes": "Replicates official ml_tweedie_validation_forecasts.npz bit-for-bit (val_MAE = 3.148493 mm)"
+      },
+      "hyperparameters_config_b_test_benchmark": {
+        "objective": "tweedie",
+        "tweedie_variance_power": 1.5,
+        "learning_rate": 0.03,
+        "num_leaves": 31,
+        "max_depth": 5,
+        "n_estimators": 100,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "random_state": 42,
+        "notes": "Used in run_stage3_test_benchmark.py; replicates ml_tweedie_test_forecasts.npz bit-for-bit (test_MAE = 3.771696 mm)"
+      },
+      "artifacts": {
+        "model_file": "sc30_lightgbm_tweedie_f2.joblib",
+        "feature_builder_file": "feature_builder_f2.joblib"
+      },
+      "benchmark_metrics": {
+        "val_MAE": 3.148493,
+        "val_RMSE": 6.687315,
+        "val_MASE": 0.850586,
+        "val_rank": 1,
+        "test_MAE": 3.750072,
+        "test_RMSE": 8.068200,
+        "test_MASE": 1.013110,
+        "test_rank": 3
+      }
+    },
+    "shadow_test_contender": {
+      "scenario_id": "SC-31",
+      "model_name": "lightgbm_tweedie_F3",
+      "registry_alias": "shadow_test_contender",
+      "governance_role": "post_audit_test_contender",
+      "feature_level": "F3",
+      "feature_count": 70,
+      "packaged_configuration": "Config A (Validation Parity)",
+      "hyperparameters_config_a": {
+        "objective": "tweedie",
+        "tweedie_variance_power": 1.5,
+        "learning_rate": 0.03,
+        "num_leaves": 31,
+        "max_depth": -1,
+        "n_estimators": 100,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "random_state": 42,
+        "notes": "Replicates official ml_tweedie_validation_forecasts.npz bit-for-bit (val_MAE = 3.193921 mm, test_MAE = 3.724641 mm)"
+      },
+      "artifacts": {
+        "model_file": "sc31_lightgbm_tweedie_f3.joblib",
+        "feature_builder_file": "feature_builder_f3.joblib"
+      },
+      "benchmark_metrics": {
+        "val_MAE": 3.193921,
+        "val_RMSE": 6.745200,
+        "val_MASE": 0.862862,
+        "val_rank": 5,
+        "test_MAE": 3.724641,
+        "test_RMSE": 8.079100,
+        "test_MASE": 1.006240,
+        "test_rank": 1
+      }
+    }
+  },
+  "sha256_checksums": {
+    "feature_builder_f2.joblib": "3d33e523348a331c922834b24deb7377cccd9b720f48177deb8dfe05e21a7f3a",
+    "feature_builder_f3.joblib": "6fb16663c99d8ce6dd127e4d0dd15afdee9e10d6fbdd1646767bd51127bdd07d",
+    "sc30_lightgbm_tweedie_f2.joblib": "e53bee647e10bb4877683419f59d948ff9445d3e26430174e27fa5c0dab1cb8a",
+    "sc31_lightgbm_tweedie_f3.joblib": "7ffafca74c8dc99f798625b5748f646182c13c65fd70469226dd8c247325aae7",
+    "sc35_xgb_h1.json": "1b1bab184cb87cc8d953ad51f9e12896baeaed134ccab68c7c9efcf2eb106b06",
+    "sc35_xgb_h2.json": "3fa6cd8cd672df4754ddaefe97f52692f949db995fa37b9712a2b650caff6524",
+    "sc35_xgb_h3.json": "5499ccf35309fea11874ec7d045c04fbd24f4a3dda40508e1faa0a9e40b7f2c9",
+    "sc35_xgb_h4.json": "2a504d86068fd9c677f4dfd4703927d3d1307f78ffa2a02d97076c7fef7b84ff",
+    "sc35_xgb_h5.json": "421d5535c5619fafdcf74ef5735d21a66b346a49c20fcab087f49092d28e066f",
+    "sc35_xgb_h6.json": "0e6be833c40d4b77ab9dc8956830cbb33a68966352bacdb820739832eaffa4aa",
+    "sc35_xgb_h7.json": "053f52e26856bd1f0f23a0e76b6fb6c82f4f31fb20b33d94eec593b1a1fc952f",
+    "sc35_xgboost_tweedie_f3.joblib": "eee30d04c666dd099608cfba6c26ea3eec690bc7bfd9a6c6715983b74515653f",
+    "standalone_inference.py": "9f5b098e6d5a1465b2857b3b9921a556ab74e92df9727c05be120cef713878c5"
+  },
+  "timezone": "Asia/Ho_Chi_Minh (UTC+7)"
+}
