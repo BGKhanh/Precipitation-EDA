@@ -21,43 +21,97 @@ class Config:
     NASA_API_MAX_PARAMS = 20
     
     # Vietnam province coordinates
-    # NOTE: Hiện tại pipeline (crawler, loader) chỉ sử dụng tọa độ TP.HCM.
-    # Các tỉnh còn lại là dữ liệu tham khảo cho mở rộng tương lai.
+    # Tọa độ chuẩn hóa cho 63 tỉnh/thành phố và 2 huyện đảo đặc biệt (Hoàng Sa, Trường Sa).
+    # Xác định theo nguyên tắc: Trung tâm hành chính đô thị / Trạm Khí tượng Thủy văn tỉnh lỵ,
+    # đảm bảo nằm trong nội địa đất liền để tránh rơi vào ô lưới biển (Marine Grid Cell) của NASA POWER.
     province_coordinates = {
-        'An Giang': (10.178240725000078, 105.09770970000004),
-        'Bắc Ninh': (21.349187305000157, 106.74542450000001),
-        'Cà Mau': (9.13654448699998, 105.18621643600011),
-        'Cần Thơ': (9.741703733000064, 105.75918675100017),
-        'Cao Bằng': (22.74423518800006, 106.08566689400014),
-        'Đà Nẵng': (15.630195780000177, 107.96775361599998),
-        'Đắk Lắk': (12.703161849000082, 108.47152799999999),
-        'Điện Biên': (21.472984652999966, 103.23483625000006),
-        'Đồng Nai': (11.435487532000025, 107.0357544190001),
-        'Đồng Tháp': (10.429642495, 105.99752250000006),
-        'Gia Lai': (13.889126754000186, 108.4407434330002),
-        'Hà Nội': (20.999185512, 105.69985103800013),
-        'Hà Tĩnh': (18.29024111300015, 105.73701072300013),
-        'Hải Phòng': (20.874078408000116, 106.47570187500008),
-        'Huế': (16.330725226000084, 107.51944430200007),
-        'Hưng Yên': (20.450079853000027, 106.46798250000006),
-        'Khánh Hòa': (12.068182784000044, 108.96232374900006),
-        'Lai Châu': (22.316816083000102, 103.18704443600006),
-        'Lâm Đồng': (11.673126970000055, 107.97005788600005),
-        'Lạng Sơn': (21.772559049000165, 106.72962900000014),
-        'Lào Cai': (22.05954434800003, 104.34920012200006),
-        'Nghệ An': (19.236395044000066, 104.94602442800003),
-        'Ninh Bình': (20.308246808000153, 106.05150048400009),
-        'Phú Thọ': (20.705206085000153, 105.33597150000007),
-        'Quảng Ngãi': (14.767478504000108, 108.14492415100005),
-        'Quảng Ninh': (21.258509962000172, 107.24335904700017),
-        'Quảng Trị': (17.239325264000055, 106.52924471000004),
-        'Sơn La': (21.192675261000087, 104.07150831800004),
-        'Tây Ninh': (10.693153264999976, 106.1242355000001),
-        'Thái Nguyên': (22.022424194000052, 105.82529783900013),
-        'Thanh Hóa': (20.0455284250001, 105.31950083899999),
-        'TP. Hồ Chí Minh': (10.993062602000066, 106.63774975000011),
-        'Tuyên Quang': (22.488710736000087, 105.10102955900003),
-        'Vĩnh Long': (9.996340202000003, 106.28911404300004)
+        # 5 Thành phố trực thuộc Trung ương
+        'Hà Nội': (21.0285, 105.8542),          # Trạm KT Láng / UBND TP (Hoàn Kiếm)
+        'TP. Hồ Chí Minh': (10.7769, 106.7009),  # Trạm KT Tân Sơn Hòa / UBND TP (Quận 1) - Cùng ô lưới MERRA-2 với Củ Chi (10.993, 106.638)
+        'Hải Phòng': (20.8651, 106.6838),       # Trạm KT Phù Liễn / Hồng Bàng
+        'Đà Nẵng': (16.0544, 108.2022),         # Trạm KT Đà Nẵng / Hải Châu
+        'Cần Thơ': (10.0452, 105.7469),         # Trạm KT Cần Thơ / Ninh Kiều
+
+        # Vùng Đồng bằng sông Hồng (8 tỉnh)
+        'Bắc Ninh': (21.1861, 106.0763),        # TP. Bắc Ninh
+        'Hà Nam': (20.5452, 105.9122),          # TP. Phủ Lý
+        'Hải Dương': (20.9386, 106.3155),       # TP. Hải Dương
+        'Hưng Yên': (20.6464, 106.0511),        # TP. Hưng Yên
+        'Nam Định': (20.4344, 106.1775),        # TP. Nam Định
+        'Ninh Bình': (20.2539, 105.9750),       # TP. Ninh Bình
+        'Thái Bình': (20.4463, 106.3366),       # TP. Thái Bình
+        'Vĩnh Phúc': (21.3089, 105.6049),       # TP. Vĩnh Yên
+
+        # Vùng Đông Bắc Bộ (9 tỉnh)
+        'Hà Giang': (22.8233, 104.9839),        # TP. Hà Giang
+        'Cao Bằng': (22.6657, 106.2570),        # TP. Cao Bằng
+        'Bắc Kạn': (22.1470, 105.8348),         # TP. Bắc Kạn
+        'Tuyên Quang': (21.8236, 105.2144),     # TP. Tuyên Quang
+        'Lào Cai': (22.4856, 103.9707),         # TP. Lào Cai
+        'Yên Bái': (21.7168, 104.9113),         # TP. Yên Bái
+        'Thái Nguyên': (21.5942, 105.8482),     # TP. Thái Nguyên
+        'Lạng Sơn': (21.8537, 106.7615),        # TP. Lạng Sơn
+        'Quảng Ninh': (20.9505, 107.0734),      # TP. Hạ Long
+
+        # Vùng Tây Bắc Bộ (6 tỉnh)
+        'Điện Biên': (21.3860, 103.0232),       # TP. Điện Biên Phủ
+        'Lai Châu': (22.3963, 103.4624),        # TP. Lai Châu
+        'Sơn La': (21.3283, 103.9188),          # TP. Sơn La
+        'Hòa Bình': (20.8172, 105.3376),        # TP. Hòa Bình
+        'Phú Thọ': (21.3228, 105.4019),         # TP. Việt Trì
+        'Bắc Giang': (21.2731, 106.1946),       # TP. Bắc Giang
+
+        # Vùng Bắc Trung Bộ (6 tỉnh)
+        'Thanh Hóa': (19.8067, 105.7852),       # TP. Thanh Hóa
+        'Nghệ An': (18.6734, 105.6813),         # TP. Vinh
+        'Hà Tĩnh': (18.3435, 105.9058),         # TP. Hà Tĩnh
+        'Quảng Bình': (17.4689, 106.6225),      # TP. Đồng Hới
+        'Quảng Trị': (16.8163, 107.1004),       # TP. Đông Hà
+        'Thừa Thiên Huế': (16.4637, 107.5909),  # TP. Huế
+        'Huế': (16.4637, 107.5909),             # Alias cho Thừa Thiên Huế
+
+        # Vùng Duyên hải Nam Trung Bộ (8 tỉnh)
+        'Quảng Nam': (15.5736, 108.4840),       # TP. Tam Kỳ
+        'Quảng Ngãi': (15.1213, 108.7923),      # TP. Quảng Ngãi
+        'Bình Định': (13.7830, 109.2197),       # TP. Quy Nhơn
+        'Phú Yên': (13.0882, 109.3175),         # TP. Tuy Hòa
+        'Khánh Hòa': (12.2388, 109.1967),       # TP. Nha Trang
+        'Ninh Thuận': (11.5681, 108.9864),      # TP. Phan Rang - Tháp Chàm
+        'Bình Thuận': (10.9273, 108.1019),      # TP. Phan Thiết
+
+        # Vùng Tây Nguyên (5 tỉnh)
+        'Kon Tum': (14.3497, 108.0005),         # TP. Kon Tum
+        'Gia Lai': (13.9831, 108.0004),         # TP. Pleiku
+        'Đắk Lắk': (12.6662, 108.0383),        # TP. Buôn Ma Thuột
+        'Đắk Nông': (12.0033, 107.6871),        # TP. Gia Nghĩa
+        'Lâm Đồng': (11.9404, 108.4583),        # TP. Đà Lạt
+
+        # Vùng Đông Nam Bộ (5 tỉnh)
+        'Bà Rịa - Vũng Tàu': (10.4966, 107.1685), # TP. Bà Rịa (trung tâm hành chính)
+        'Bình Dương': (10.9805, 106.6519),        # TP. Thủ Dầu Một
+        'Bình Phước': (11.5333, 106.8833),        # TP. Đồng Xoài
+        'Đồng Nai': (10.9574, 106.8427),          # TP. Biên Hòa
+        'Tây Ninh': (11.3131, 106.0988),          # TP. Tây Ninh
+
+        # Vùng Đồng bằng sông Cửu Long (13 tỉnh)
+        'An Giang': (10.3759, 105.4358),        # TP. Long Xuyên
+        'Bạc Liêu': (9.2941, 105.7278),         # TP. Bạc Liêu
+        'Bến Tre': (10.2415, 106.3759),         # TP. Bến Tre
+        'Cà Mau': (9.1769, 105.1524),           # TP. Cà Mau
+        'Đồng Tháp': (10.4538, 105.6322),       # TP. Cao Lãnh
+        'Hậu Giang': (9.7845, 105.4701),        # TP. Vị Thanh
+        'Kiên Giang': (10.0125, 105.0809),      # TP. Rạch Giá
+        'Long An': (10.5364, 106.4104),         # TP. Tân An
+        'Sóc Trăng': (9.6033, 105.9722),        # TP. Sóc Trăng
+        'Tiền Giang': (10.3600, 106.3600),      # TP. Mỹ Tho
+        'Trà Vinh': (9.9347, 106.3455),         # TP. Trà Vinh
+        'Vĩnh Long': (10.2537, 105.9722),       # TP. Vĩnh Long
+
+        # 2 Quần đảo / Huyện đảo đặc biệt của Việt Nam
+        'Hoàng Sa': (16.5333, 111.6000),             # Đảo Hoàng Sa - Huyện đảo Hoàng Sa, TP. Đà Nẵng
+        'Quần đảo Hoàng Sa': (16.5333, 111.6000),    # Alias
+        'Trường Sa': (8.6439, 111.9197),             # Đảo Trường Sa Lớn - Huyện đảo Trường Sa, Tỉnh Khánh Hòa
+        'Quần đảo Trường Sa': (8.6439, 111.9197)     # Alias
     }
     
     # Data parameters
