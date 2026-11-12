@@ -497,3 +497,8 @@ def build_xgboost_hurdle(
         model_alias="XGBoost_Hurdle",
     )
 
+
+# Alias for backward compatibility
+HurdleModel = DirectHurdleForecaster
+
+

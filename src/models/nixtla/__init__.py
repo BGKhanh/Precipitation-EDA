@@ -1,9 +1,12 @@
-"""Nixtla ecosystem adapters for forecasting."""
+"""
+Nixtla Ecosystem Wrappers & Canonical Defaults
+==============================================
+Provides production wrappers for StatsForecast and NeuralForecast:
+- StatsForecastWrapper: Intermittent & statistical models
+- FrozenIntermittentWrapper: Croston/ADIDA/IMAPA/TSB wrappers
+- defaults: Canonical model registries and hyperparameters
+"""
 
-from .base_adapter import BaseNixtlaAdapter, to_nixtla_format
-from .stats_adapter import StatsForecastAdapter
-from .ml_adapter import MLForecastAdapter
-from .neural_adapter import NeuralForecastAdapter
 from .wrappers import StatsForecastWrapper, FrozenIntermittentWrapper
 from .defaults import (
     get_statistical_models,
@@ -19,13 +22,8 @@ from .defaults import (
 )
 
 __all__ = [
-    "BaseNixtlaAdapter",
-    "StatsForecastAdapter",
-    "MLForecastAdapter",
-    "NeuralForecastAdapter",
     "StatsForecastWrapper",
     "FrozenIntermittentWrapper",
-    "to_nixtla_format",
     "get_statistical_models",
     "get_eda_arima_model",
     "get_eda_sarima_model",
