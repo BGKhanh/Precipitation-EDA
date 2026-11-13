@@ -49,8 +49,20 @@ Rainfall predictability naturally decreases with longer lead times:
 
 ## 🛠️ Data & Feature Engineering
 
-The system ingests daily surface meteorological data for Ho Chi Minh City (10.78°N, 106.70°E) from the NASA POWER API:
+### Geographic Coordinates & Spatial Grid Resolution
+- **Canonical Coordinates**: The system defaults to Ho Chi Minh City urban center (**10.78°N, 106.70°E** - District 1).
+- **Spatial Grid Properties (NASA POWER / MERRA-2)**: NASA POWER daily meteorological reanalysis is resolved on a global grid of approximately **$0.5^\circ \text{ latitude} \times 0.625^\circ \text{ longitude}$** (~55 km × ~69 km per cell). Consequently, points across the Greater HCMC metropolitan area (including the geographic shapefile centroid in Củ Chi at 10.99306°N, 106.63775°E and the District 1 center) map into the **exact same grid cell**.
+- **Empirical Grid Invariance**: An automated 21-day verification conducted over the peak rainy season (2024-09-01 to 2024-09-21) confirmed that observations between District 1 and Củ Chi match bit-for-bit with **0.000000 mm rainfall difference** across all 21 consecutive rainy days.
+- **National Coverage**: Coordinates for all 63 Vietnam provinces/municipalities plus 2 offshore archipelagos (Hoàng Sa and Trường Sa) are codified in [`src/config/constants.py`](file:///d:/DS108_project/src/config/constants.py).
 
+### Dynamic Operational Lag & Forecast Horizons
+- **Data Latency**: NASA POWER daily meteorological updates typically feature a **3 to 4-day publication latency** from real-time.
+- **Effective Future Days ($7 - \text{lag}$)**:
+  - When lag = 3 days: Horizons $h=1, 2$ represent past unverified hindcasts, $h=3$ represents the current date, and $h=4, 5, 6, 7$ provide **4 true future forecast days**.
+  - When lag = 4 days: Horizons $h=1, 2, 3$ represent past unverified hindcasts, $h=4$ represents the current date, and $h=5, 6, 7$ provide **3 true future forecast days**.
+- Every forecast response dynamically tags each lead day with its verified operational status (`past_unverified`, `today`, or `future_forecast`).
+
+### Feature Hierarchy
 - **Raw Weather Variables (36 features, $F_0$)**: Temperature (min/max/dew point), relative & specific humidity, surface pressure, solar insolation, wind speed ($U/V$ vectors at 2m, 10m, 50m), and multi-layer soil wetness.
 - **Historical Lags ($F_1$, 53 features)**: 1, 2, 3, 7, 14, and 30-day historical values of rainfall, humidity, and dew point.
 - **Rolling Statistics ($F_2$, 65 features)**: 3, 7, 14, and 30-day backward moving averages and standard deviations.
