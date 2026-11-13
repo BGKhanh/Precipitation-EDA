@@ -59,19 +59,6 @@ from .protocols import (
     DATE_COL,
 )
 
-from .benchmark import (
-    UnifiedBenchmark,
-    UnifiedBenchmarkRunner,
-    RollingBenchmarkCoordinator,
-    ProcessScopedInterruption,
-    rank_benchmark_results,
-    select_with_epsilon_tiebreak,
-    select_neural_context_window,
-    diebold_mariano_hac_test,
-    moving_block_bootstrap_ci,
-    run_confirmatory_dm_inference,
-)
-
 __all__ = [
     # Canonical Point Metrics & Diagnostics
     "mean_absolute_error",
@@ -114,15 +101,4 @@ __all__ = [
     "RAIN_COMPARISON_OPERATOR",
     "TARGET_COL",
     "DATE_COL",
-    # Benchmarks & Coordinator
-    "UnifiedBenchmark",
-    "UnifiedBenchmarkRunner",
-    "RollingBenchmarkCoordinator",
-    "ProcessScopedInterruption",
-    "rank_benchmark_results",
-    "select_with_epsilon_tiebreak",
-    "select_neural_context_window",
-    "diebold_mariano_hac_test",
-    "moving_block_bootstrap_ci",
-    "run_confirmatory_dm_inference",
 ]
