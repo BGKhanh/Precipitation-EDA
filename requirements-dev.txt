@@ -1,0 +1,10 @@
+# Development, benchmarking, tracking and testing dependencies
+# Verified from active conda environment (Python 3.12)
+-r requirements-serving.txt
+mlflow==3.18.0
+pytest==9.1.1
+statsforecast==2.1.1
+neuralforecast==3.2.2
+statsmodels==0.15.0
+optuna==5.0.0
+
